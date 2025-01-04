@@ -1,0 +1,33 @@
+name = "jenny-ai-turo"
+main = "src/index.ts"
+compatibility_date = "2025-01-02"
+
+compatibility_flags = [ "nodejs_compat" ]
+
+[vars]
+SUPABASE_URL = "https://usjdmsieclzehogkqlag.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVzamRtc2llY2x6ZWhvZ2txbGFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzMxMTIxOTQsImV4cCI6MjA0ODY4ODE5NH0.xZ8JFUjQ0hSprKpZLLPbe3gneRlCx5tTN_ed_5QZai0"
+APP_URL = "http://localhost:3000"
+ULTRAVOX_API_KEY = "tpPvdGuM.oswYED3sO9DgtgmZoQioF38aDfHLdnbL"
+GOOGLE_CLIENT_ID = "923267105233-qjohnl0so1cf2s0le1jo69i3gsbnaqbo.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET = "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"
+
+# [[kv_namespaces]]
+# binding = "MY_KV_NAMESPACE"
+# id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# [[r2_buckets]]
+# binding = "MY_BUCKET"
+# bucket_name = "my-bucket"
+
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "my-database"
+# database_id = ""
+
+# [ai]
+# binding = "AI"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
