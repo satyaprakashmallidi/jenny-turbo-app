@@ -28,7 +28,7 @@ declare module 'hono' {
 //Enabling CORS
 const corsOptions = {
   origin: (origin: string) => {
-    const ALLOWED_ORIGINS = ['http://localhost:3000', 'https://jennyai.netlify.app']
+    const ALLOWED_ORIGINS = ['http://localhost:3000', 'https://magicteams.netlify.app']
     
     return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
   },
@@ -120,11 +120,12 @@ app.post('/api/ultravox/createcall' , async (c) => {
     console.log("Creating Ultravox Call After call");
 
     if (!response.ok) {
-      const errorText =  response.text();
+      const errorText = await response.text();
       console.error("Ultravox API error:", errorText);
       return c.json({
         status: 'error',
         message: 'Ultravox API error',
+        error:  errorText ,
       } , 500);
     }
 
@@ -204,9 +205,193 @@ app.get('/api/ultravox/voices' , async (c) => {
   
 })
 
-app.get('/', (c) => {
+
+app.post('/api/sendSummary' , async (c) => {
+
+  try{
+    
+    const body = await c.req.json();  
+    const supabase = getSupabaseClient(c.env);
+
+    const callId = c.req.query('call_id');
+    console.log("Recevied Summary Body",body , "Caaacac IDD " , callId);
+
+    if(!callId){
+      return c.json({
+        status: 'error',
+        message: 'Missing callId',
+      } , 500);
+    }
+
+    const { data , error } = await supabase.from('summarys').upsert([
+      { call_id: callId , summary: body?.conversationSummary }
+    ], {
+      onConflict: 'call_id'
+    })
+
+    console.log("Recevied Summary Body",body);
+
+    if(error){
+      console.error("Recevied Summary Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+
+    return c.json({
+      status: 'success',
+      message: 'Received Summary',
+    });
+    
+
+  }
+  catch(error){
+    console.error("Receiveing Summary Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+
+})
+
+app.get('/api/getSummary' , async (c) => {
+  const callId = c.req.query('call_id');
+  const supabase = getSupabaseClient(c.env);
+
+  if(!callId){
+    return c.json({
+      status: 'error',
+      message: 'Missing callId',
+    } , 500);
+
+
+  }
+
+  const { data , error } = await supabase.from('summarys').select('*').eq('call_id' , callId);
+
+  if(error){
+    console.error("Recevied Summary Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+
+  return c.json({
+    status: 'success',
+    data: data
+  });
+})
+
+app.post('/api/add-call-to-db' , async (c) => {
+  const body = await c.req.json();
+
+  const { user_id , call_id , bot_id } = body;
+  const call_date = new Date().toISOString().split('T')[0];
+
+  const supabase = getSupabaseClient(c.env);
+
+  // Fetch existing record for the user and date
+  const { data: existingData, error: fetchError } = await supabase
+  .from('user_calls')
+  .select('call_details')
+  .eq('user_id', user_id)
+  .eq('call_date', call_date)
+  .single();
+
+  let updatedCallDetails = [];
+
+    if (existingData) {
+      updatedCallDetails = existingData.call_details || [];
+    } 
+    updatedCallDetails.push({
+      [call_id]: bot_id
+    });  // Append new call to array
+
+    // Upsert updated data
+    const { data, error } = await supabase
+      .from('user_calls')
+      .upsert([
+        {
+          user_id,
+          call_date,
+          call_details: updatedCallDetails,  // Updated call details array
+        }
+      ], { onConflict: 'user_id, call_date' });
+
+    if (error) {
+      return c.json({ error: error.message }, 400);
+    }
+
+    return c.json({ message: 'Call recorded successfully'});
+  
+
+})
+
+app.get('/api/get-all-calls-of-user' ,async (c) => {
+    try{
+
+      const userId = c.req.query('user_id');
+      const supabase = getSupabaseClient(c.env);
+
+      if(!userId){
+        return c.json({
+          status: 'error',
+          message: 'Missing user_id',
+        } , 500);
+      }
+
+      const { data , error } = await supabase.from('user_calls').select('call_details').eq('user_id' , userId);
+      if(error){
+        console.error("Recevied Summary Error",error);
+        return c.json({
+          status: 'error',
+          message: 'Internal Server Error',
+          error:  error ,
+        } , 500);
+      }
+
+      return c.json({
+        status: 'success',
+        data: data
+      });
+    }
+    catch(error){
+      console.error("Receiveing Summary Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+})
+
+
+app.get('/', async (c) => {
   const env = getEnv(c.env)
-  const supabase = getSupabaseClient(env)
+  const supabase = getSupabaseClient(env);
+
+  const { data , error } = await supabase.from('summarys').upsert([
+    { call_id: "54aaa19e-b1b2-4951-971a-b73c23025f0e" , summary: "this is testing the fucking api" }
+  ], {
+    onConflict: 'call_id'
+  });
+
+  if(error){
+    console.error("Recevied Summary Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+
+
   return c.text('Hello Hono! ' + env.SUPABASE_URL)
 })
 
