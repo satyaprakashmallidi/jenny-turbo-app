@@ -107,8 +107,6 @@ app.post('/api/ultravox/createcall' , async (c) => {
         message: 'UltraAgent API key',
       } , 500);
     }
-
-    console.log("Creating Ultravox vefor vavll " , c.env.ULTRAVOX_API_KEY);
     const response = await fetch('https://api.ultravox.ai/api/calls', {
       method: 'POST',
       headers: {
@@ -267,7 +265,25 @@ app.get('/api/getSummary' , async (c) => {
       status: 'error',
       message: 'Missing callId',
     } , 500);
+  }
 
+  const response = await fetch('https://api.ultravox.ai/api/calls/' + callId, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': c.env.ULTRAVOX_API_KEY,
+    },
+  });
+
+  const twilioResp = await response.json();
+
+  if(twilioResp && twilioResp?.shortSummary){
+  
+    await supabase.from('summarys').upsert([
+      { call_id: callId , summary: twilioResp?.shortSummary }
+    ], {
+      onConflict: 'call_id'
+    })
 
   }
 
@@ -346,7 +362,7 @@ app.get('/api/get-all-calls-of-user' ,async (c) => {
         } , 500);
       }
 
-      const { data , error } = await supabase.from('user_calls').select('call_details').eq('user_id' , userId);
+      const { data , error } = await supabase.from('user_calls').select('call_date , call_details').eq('user_id' , userId);
       if(error){
         console.error("Recevied Summary Error",error);
         return c.json({
