@@ -193,4 +193,25 @@ export interface CalendarAccount {
     status: 'pending' | 'confirmed' | 'cancelled';
     created_at: string;
   }
+  export interface twilioData{
+    sid: string;
+    ultravox_call_id: string;
+    bot_id: string;
+    user_id: string | null;
+    status: string;
+    from_number: string;
+    to_number: string;
+    created_at: string;
+  }
   
+  export interface ultravoxData{
+    call_sid: string;
+    ultravox_call_id: string;
+    bot_id: string;
+    user_id: string | null;
+    status: string;
+    from_number: string;
+    to_number: string;
+    created_at: string;
+    callId: string;
+  }

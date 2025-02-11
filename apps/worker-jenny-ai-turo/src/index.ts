@@ -5,7 +5,7 @@ import { Env, getEnv } from './config/env'
 import { SupabaseClient } from '@supabase/supabase-js'
 import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
-import { CallConfig } from '@repo/common-types/types'
+import { twilioData, ultravoxData } from '@repo/common-types/types'
 
 
 //Caching Voices
@@ -410,5 +410,565 @@ app.get('/', async (c) => {
 
   return c.text('Hello Hono! ' + env.SUPABASE_URL)
 })
+
+app.put('/api/twilio/createAccount', async (c) => {
+  try{
+
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+  
+    const body = await c.req.json()
+    const { accountSID, authToken, fromNumber, user_id } = body
+  
+    if (!accountSID || !authToken || !fromNumber || !user_id) {
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters',
+      }, 500);
+    }
+  
+    const formData = {
+      account_sid: accountSID,
+      auth_token: authToken,
+      from_number: fromNumber,
+      is_deleted: false,
+    }
+    const { data, error } = await supabase
+      .from('twilio_credentials')
+      .insert([{
+        ...formData,
+        user_id: user_id
+      }])
+      .select();
+    if (error){
+      console.error("Recevied /twilio/createAccount Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+
+    return c.json({
+      status: 'success',
+      data: data ,
+    })
+  }catch(error){
+    console.error("Create Account Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+
+})
+
+app.patch('/api/twilio/updateAccount', async (c) => {
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const body = await c.req.json()
+    const { accountSID, authToken, fromNumber, user_id, id } = body
+
+    if (!accountSID || !authToken || !fromNumber || !user_id) {
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters',
+      }, 500);
+    }
+
+    const { data, error } = await supabase
+      .from('twilio_credentials')
+      .update({
+        account_sid: accountSID,
+        auth_token: authToken,
+        from_number: fromNumber,
+      })
+      .eq('id', id)
+      .select();
+
+    if (error){
+      console.error("Recevied /twilio/updateAccount Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+
+    return c.json({
+      status: 'success',
+      data: data ,
+    })
+
+  }catch(error){
+    console.error("Update Account Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+})
+
+
+app.delete('/api/twilio/deleteAccount', async (c) => {
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const body = await c.req.json()
+    const { id } = body
+    if (!id) {
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters',
+      }, 500);
+    }
+    const { data, error } = await supabase
+      .from('twilio_credentials')
+      .update({
+        is_deleted: true
+      })
+      .eq('id', id)
+      .select();
+
+    if (error){
+      console.error("Recevied /twilio/deleteAccount Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: data ,
+    })
+  }catch(error){
+    console.error("Delete Account Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+})
+
+app.get('/api/twilio/getAccounts', async (c) => {
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const { data, error } = await supabase
+      .from('twilio_credentials')
+      .select();
+    if (error){
+      console.error("Recevied /twilio/getAccount Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: data ,
+    })
+  }catch(error){
+    console.error("Get Account Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+})
+
+app.get('/api/twilio/getAccount/:id', async (c) => {
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const { data, error } = await supabase
+      .from('twilio_credentials')
+      .select();
+    if (error){
+      console.error("Recevied /twilio/credentials Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: data ,
+    })
+  }catch(error){
+    console.error("Get Credentials Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+})
+
+app.post('api/agent/create', async (c) => {
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const body = await c.req.json()
+    const { name, twilio_from_number, user_id, voice_id } = body
+
+
+    const { data: insertedBot, error } = await supabase
+        .from("bots")
+        .insert([{
+          name,
+          twilio_from_number,
+          voice_id,
+          is_deleted: false,
+          created_at: new Date(),
+          is_appointment_booking_allowed: false,
+          user_id: user_id,
+        }])
+        .select()
+        .single();
+
+    if (error){
+      console.error("Recevied /agent/create Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: insertedBot ,
+    })
+  }catch(error){
+    console.error("Recevied /agent/create Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+})
+
+app.post('api/agent/update',async (c)=>{
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const body = await c.req.json()
+    const { id, name, twilio_from_number, voice_id } = body
+
+    const { data: insertedBot, error } = await supabase
+        .from("bots")
+        .update({
+          name,
+          twilio_from_number,
+          voice_id,
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+    if (error){
+      console.error("Recevied /agent/update Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: insertedBot ,
+    })
+  }catch(error){
+    console.error("Recevied /agent/update Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+})
+
+app.delete('api/agent/delete', async (c) => {
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const body = await c.req.json()
+    const { id } = body
+
+    const { data: insertedBot, error } = await supabase
+        .from("bots")
+        .update({
+          is_deleted: true,
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+    if (error){
+      console.error("Recevied /agent/delete Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: insertedBot ,
+    })
+  }catch(error){
+    console.error("Recevied /agent/delete Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+}) 
+
+app.get('api/agent/get/:id', async (c) => {
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const { id } = c.req.param()
+    const { data: insertedBot, error } = await supabase
+        .from("bots")
+        .select()
+        .eq('id', id)
+        .single();
+
+    if (error){
+      console.error("Recevied /agent/get Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: insertedBot ,
+    })
+  }catch(error){
+    console.error("Recevied /agent/get Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+})
+
+app.get('api/agent/get', async (c) => {
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const { data: insertedBot, error } = await supabase
+        .from("bots")
+        .select();
+
+    if (error){
+      console.error("Recevied /agent/get Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: insertedBot ,
+    })
+  }catch(error){
+    console.error("Recevied /agent/get Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+})
+
+// Add this endpoint before export default app
+app.post('/api/twilio/make-call', async (c) => {
+  try {
+    const body = await c.req.json();
+    const {
+      twilioAccountSid,
+      twilioAuthToken,
+      twilioFromNumber,
+      toNumber,
+      botId,
+      userName,
+      userId,
+      appointmentId
+    } = body;
+
+    // Validate required parameters
+    if (!twilioAccountSid || !twilioAuthToken || !twilioFromNumber || !toNumber || !botId) {
+      return c.json({
+        status: 'error',
+        message: 'Missing required parameters',
+      }, 400);
+    }
+
+    // 1. First create Ultravox call
+    const ultravoxResponse = await fetch('https://api.ultravox.ai/api/calls', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': c.env.ULTRAVOX_API_KEY,
+      },
+      body: JSON.stringify({
+        botId,
+        phoneNumber: toNumber,
+        userName,
+        appointmentId
+      }),
+    });
+
+    if (!ultravoxResponse.ok) {
+      const errorText = await ultravoxResponse.text();
+      throw new Error(`Ultravox API error: ${errorText}`);
+    }
+
+    const ultravoxData : ultravoxData = await ultravoxResponse.json();
+
+    const ultravoxCallId = ultravoxData?.callId;
+
+    // 2. Create Twilio call and connect it to Ultravox
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Calls.json`;
+    const twilioResponse = await fetch(twilioUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': 'Basic ' + btoa(`${twilioAccountSid}:${twilioAuthToken}`)
+      },
+      body: new URLSearchParams({
+        To: toNumber,
+        From: twilioFromNumber,
+        Url: `https://api.ultravox.ai/api/twilio/connect?callId=${ultravoxCallId}`,
+        StatusCallback: `${c.env.BASE_URL}/api/twilio/webhook`,
+        StatusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'].join(' '),
+        StatusCallbackMethod: 'POST'
+      })
+    });
+
+    if (!twilioResponse.ok) {
+      const errorText = await twilioResponse.text();
+      throw new Error(`Twilio API error: ${errorText}`);
+    }
+
+    const twilioData : twilioData = await twilioResponse.json();
+
+    // 3. Save call details to database
+    const supabase = getSupabaseClient(c.env);
+    const call_date = new Date().toISOString().split('T')[0];
+
+    // Save to user_calls table
+    if (userId) {
+      const { data: existingData } = await supabase
+        .from('user_calls')
+        .select('call_details')
+        .eq('user_id', userId)
+        .eq('call_date', call_date)
+        .single();
+
+      let updatedCallDetails = [];
+      if (existingData) {
+        updatedCallDetails = existingData.call_details || [];
+      }
+      updatedCallDetails.push({
+        [ultravoxCallId]: botId
+      });
+
+      await supabase
+        .from('user_calls')
+        .upsert([{
+          user_id: userId,
+          call_date,
+          call_details: updatedCallDetails,
+        }], { onConflict: 'user_id, call_date' });
+    }
+
+    // Save initial call status
+    await supabase
+      .from('call_logs')
+      .insert([{
+        call_sid: twilioData.sid,
+        ultravox_call_id: ultravoxCallId,
+        bot_id: botId,
+        user_id: userId,
+        status: twilioData.status,
+        from_number: twilioFromNumber,
+        to_number: toNumber,
+        created_at: new Date().toISOString()
+      }]);
+
+    return c.json({
+      status: 'success',
+      data: {
+        twilioCallSid: twilioData.sid,
+        ultravoxCallId: ultravoxCallId,
+        status: twilioData.status
+      }
+    });
+
+  } catch (error) {
+    console.error('Make Call Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Failed to make call',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// Add a webhook handler for Twilio status callbacks
+app.post('/api/twilio/webhook', async (c) => {
+  try {
+    const body = await c.req.parseBody();
+    const {
+      CallSid,
+      CallStatus,
+      From,
+      To,
+      Duration
+    } = body;
+
+    // Update call status in database
+    const supabase = getSupabaseClient(c.env);
+    await supabase
+      .from('call_logs')
+      .update({
+        status: CallStatus,
+        duration: Duration,
+        updated_at: new Date().toISOString()
+      })
+      .eq('call_sid', CallSid);
+
+    return c.json({
+      status: 'success',
+      message: 'Webhook processed successfully'
+    });
+
+  } catch (error) {
+    console.error('Webhook Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Failed to process webhook',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
 
 export default app
