@@ -516,8 +516,7 @@ app.delete('/api/twilio/deleteAccount', async (c) => {
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
-    const body = await c.req.json()
-    const { id } = body
+    const id = c.req.query('id')
     if (!id) {
       return c.json({
         status: 'error',
@@ -773,8 +772,45 @@ app.delete('/api/agent/deleteAgent', async (c) => {
         message: 'Missing parameters',
       }, 500);
     }
+    const {data: existingBot, error: supabaseError } = await supabase
+        .from("bots")
+        .select()
+        .eq('id', id)
+        .single();
+        
+    if (!existingBot){
+      console.error("Recevied /agent/delete Error : Bot not found");
+      return c.json({
+        status: 'error',
+        message: 'Bot with id ' + id + ' not found',
+      } , 500);
+    }
+    if (existingBot?.is_deleted){
+      console.error("Recevied /agent/delete Error : Bot already deleted");
+      return c.json({
+        status: 'error',
+        message: 'Bot with id ' + id + ' already deleted',
+      } , 500);
+    }
+    if (supabaseError){
+      console.error("Recevied /agent/delete Error", supabaseError);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  supabaseError ,
+      } , 500);
+    }
 
-    const { data: insertedBot, error } = await supabase
+    if (supabaseError){
+      console.error("Recevied /agent/delete Error", supabaseError);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  supabaseError ,
+      } , 500);
+    }
+
+    const { data: deletedBot, error } = await supabase
         .from("bots")
         .update({
           is_deleted: true,
@@ -793,7 +829,7 @@ app.delete('/api/agent/deleteAgent', async (c) => {
     }
     return c.json({
       status: 'success',
-      data: insertedBot ,
+      data: deletedBot ,
     })
   }catch(error){
     console.error("Recevied /agent/delete Error",error);
