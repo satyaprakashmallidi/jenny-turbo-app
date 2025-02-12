@@ -530,7 +530,7 @@ app.patch('/api/twilio/:id', async (c) => {
     const supabase = getSupabaseClient(env);
     const id = c.req.param('id')
     const body = await c.req.json()
-    const { accountSID, authToken, fromNumber, user_id } = body
+    const { account_sid:accountSID, auth_token:authToken, from_phone_number:fromNumber, user_id } = body
 
     if (!accountSID || !authToken || !fromNumber || !user_id) {
       return c.json({
