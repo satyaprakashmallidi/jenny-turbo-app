@@ -708,7 +708,6 @@ app.post('/api/agent', async (c) => {
     if (!name  || !user_id || !voice_id || !system_prompt) {
       console.error("Recevied /agent/createAgent Error : Missing parameters",{
         name : name,
-        twilio_from_number : twilio_from_number,
         user_id : user_id,
         voice_id : voice_id,
         system_prompt : system_prompt
