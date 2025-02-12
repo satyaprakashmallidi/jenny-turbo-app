@@ -477,7 +477,7 @@ app.post('/api/twilio', async (c) => {
     const supabase = getSupabaseClient(env);
   
     const body = await c.req.json()
-    const { accountSID, authToken, fromNumber, user_id } = body
+    const { account_sid:accountSID, auth_token:authToken, from_phone_number:fromNumber, user_id } = body
   
     if (!accountSID || !authToken || !fromNumber || !user_id) {
       return c.json({
