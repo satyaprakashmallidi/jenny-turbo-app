@@ -1,16 +1,16 @@
 # Delete Agent API
 
-Soft deletes an existing AI agent by setting its is_deleted flag to true.
+Deletes a specific agent.
 
 ## Endpoint
 
 ```http
-DELETE /api/agent/deleteAgent
+DELETE /api/agent/{id}
 ```
 
 ## Request
 
-### Query Parameters
+### Path Parameters
 
 | Parameter | Type   | Required | Description |
 |-----------|--------|----------|-------------|
@@ -19,7 +19,7 @@ DELETE /api/agent/deleteAgent
 ### Example Request
 
 ```http
-DELETE /api/agent/deleteAgent?id=2bd43cf5-52d9-4917-84f3-c5defd82ccc9
+DELETE /api/agent/2bd43cf5-52d9-4917-84f3-c5defd82ccc9
 ```
 
 ## Response
@@ -46,15 +46,7 @@ DELETE /api/agent/deleteAgent?id=2bd43cf5-52d9-4917-84f3-c5defd82ccc9
 
 ### Error Responses
 
-#### Missing Parameters (500 Internal Server Error)
-```json
-{
-    "status": "error",
-    "message": "Missing parameters"
-}
-```
-
-#### Bot Not Found (500 Internal Server Error)
+#### Bot Not Found (404 Not Found)
 ```json
 {
     "status": "error",
@@ -62,7 +54,7 @@ DELETE /api/agent/deleteAgent?id=2bd43cf5-52d9-4917-84f3-c5defd82ccc9
 }
 ```
 
-#### Already Deleted (500 Internal Server Error)
+#### Already Deleted (400 Bad Request)
 ```json
 {
     "status": "error",

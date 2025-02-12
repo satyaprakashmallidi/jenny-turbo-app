@@ -1,28 +1,24 @@
 # Get Twilio Account API
 
-Retrieves details of a specific Twilio account's credentials.
+Retrieves a specific Twilio account configuration.
 
 ## Endpoint
 
 ```http
-GET /api/twilio/getAccount
+GET /api/twilio/{id}
 ```
 
-## Request
-
-### Query Parameters
+### Path Parameters
 
 | Parameter | Type   | Required | Description |
 |-----------|--------|----------|-------------|
-| id        | string | Yes      | The unique identifier of the Twilio credentials record to retrieve |
+| id        | string | Yes      | UUID of the Twilio account configuration |
 
 ### Example Request
 
 ```http
-GET /api/twilio/getAccount?id=30
+GET /api/twilio/2bd43cf5-52d9-4917-84f3-c5defd82ccc9
 ```
-
-## Response
 
 ### Success Response (200 OK)
 
@@ -38,7 +34,6 @@ GET /api/twilio/getAccount?id=30
         "created_at": "2025-02-12T13:28:58.621609"
     }
 }
-```
 
 ### Error Responses
 
@@ -48,7 +43,6 @@ GET /api/twilio/getAccount?id=30
     "status": "error",
     "message": "Missing parameters"
 }
-```
 
 #### Database Error (500 Internal Server Error)
 ```json

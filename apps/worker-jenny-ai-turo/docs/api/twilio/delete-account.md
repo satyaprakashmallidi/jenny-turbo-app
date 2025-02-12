@@ -1,25 +1,25 @@
 # Delete Twilio Account API
 
-Deletes an existing Twilio account's credentials.
+Deletes a specific Twilio account configuration.
 
 ## Endpoint
 
 ```http
-DELETE /api/twilio/deleteAccount
+DELETE /api/twilio/{id}
 ```
 
 ## Request
 
-### Query Parameters
+### Path Parameters
 
 | Parameter | Type   | Required | Description |
 |-----------|--------|----------|-------------|
-| id        | string | Yes      | The unique identifier of the Twilio credentials record to delete |
+| id        | string | Yes      | UUID of the Twilio account configuration to delete |
 
 ### Example Request
 
 ```http
-DELETE /api/twilio/deleteAccount?id=31
+DELETE /api/twilio/2bd43cf5-52d9-4917-84f3-c5defd82ccc9
 ```
 
 ## Response
@@ -52,12 +52,21 @@ DELETE /api/twilio/deleteAccount?id=31
 }
 ```
 
+#### Account Not Found (404 Not Found)
+```json
+{
+    "status": "error",
+    "message": "Twilio account not found"
+}
+```
+
 #### Database Error (500 Internal Server Error)
 ```json
 {
     "status": "error",
     "message": "Internal Server Error",
     "error": {
-        // Error details from the database
+        // Supabase error details
     }
 }
+```

@@ -1,64 +1,54 @@
-# Twilio Credentials API Documentation
+# Twilio Credentials API
 
-## Create Twilio Account Credentials
+## Create Twilio Account
 
-Creates new Twilio account credentials for a user.
+Creates a new Twilio account configuration.
 
 ### Endpoint
 
-```
-PUT /api/twilio/createAccount
-```
-
-### Request
-
-#### Headers
-```
-Content-Type: application/json
+```http
+POST /api/twilio
 ```
 
-#### Body Parameters
+### Request Body
 
-| Parameter  | Type   | Required | Description |
-|------------|--------|----------|-------------|
-| user_id    | string | Yes      | The unique identifier of the user |
-| accountSID | string | Yes      | The Twilio Account SID |
-| authToken  | string | Yes      | The Twilio Auth Token |
-| fromNumber | string | Yes      | The Twilio phone number to be used for making calls |
-
-#### Example Request Body
 ```json
 {
-  "user_id": "c99f0ac3-a143-4be9-ad80-3f59cd04d712",
-  "accountSID": "12544943215454",
-  "authToken": "wregwretwetwewerft",
-  "fromNumber": "123456789"
+    "accountSID": "your_account_sid",
+    "authToken": "your_auth_token",
+    "fromNumber": "+1234567890",
+    "user_id": "user-uuid"
 }
 ```
 
-### Response
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| accountSID | string | Yes | Twilio Account SID |
+| authToken | string | Yes | Twilio Auth Token |
+| fromNumber | string | Yes | Twilio Phone Number |
+| user_id | string | Yes | UUID of the user |
 
-#### Success Response (200 OK)
+### Success Response (200 OK)
 
 ```json
 {
     "status": "success",
     "data": [
         {
-            "id": 29,
-            "user_id": "c99f0ac3-a143-4be9-ad80-3f59cd04d712",
-            "account_sid": "12544943215454",
-            "auth_token": "wregwretwetwewerft",
-            "from_phone_number": "123456789",
-            "created_at": "2025-02-12T13:22:05.455357"
+            "id": "credential-uuid",
+            "account_sid": "your_account_sid",
+            "auth_token": "your_auth_token",
+            "from_phone_number": "+1234567890",
+            "user_id": "user-uuid",
+            "created_at": "2025-02-12T13:28:58.621609"
         }
     ]
 }
 ```
 
-#### Error Response (500 Internal Server Error)
+### Error Responses
 
-##### Missing Parameters
+#### Missing Parameters (500 Internal Server Error)
 ```json
 {
     "status": "error",
@@ -66,13 +56,13 @@ Content-Type: application/json
 }
 ```
 
-##### Internal Server Error
+#### Database Error (500 Internal Server Error)
 ```json
 {
     "status": "error",
     "message": "Internal Server Error",
     "error": {
-        // Error details
+        // Supabase error details
     }
 }
 ```
@@ -81,12 +71,11 @@ Content-Type: application/json
 
 The credentials are stored in the `twilio_credentials` table with the following structure:
 
-| Column            | Type      | Description |
-|------------------|-----------|-------------|
-| id               | integer   | Primary key, auto-incrementing |
-| user_id          | string    | Foreign key to users table |
-| account_sid      | string    | Twilio Account SID |
+| Column           | Type      | Description |
+|-----------------|-----------|-------------|
+| id              | uuid      | Primary key |
+| user_id         | uuid      | Foreign key to users table |
+| account_sid     | string    | Twilio Account SID |
 | auth_token       | string    | Twilio Auth Token |
 | from_phone_number| string    | Twilio phone number |
 | created_at       | timestamp | Creation timestamp |
-

@@ -1,11 +1,11 @@
 # Update Twilio Account API
 
-Updates an existing Twilio account's credentials.
+Updates an existing Twilio account configuration.
 
 ## Endpoint
 
 ```http
-PATCH /api/twilio/updateAccount
+PATCH /api/twilio/{id}
 ```
 
 ## Request
@@ -15,25 +15,29 @@ PATCH /api/twilio/updateAccount
 Content-Type: application/json
 ```
 
+### Path Parameters
+
+| Parameter | Type   | Required | Description |
+|-----------|--------|----------|-------------|
+| id        | string | Yes      | UUID of the Twilio account configuration to update |
+
 ### Body Parameters
 
-| Parameter  | Type    | Required | Description |
-|------------|---------|----------|-------------|
-| id         | string  | Yes      | The unique identifier of the Twilio credentials record |
-| user_id    | string  | Yes      | The unique identifier of the user |
-| accountSID | string  | Yes      | The updated Twilio Account SID |
-| authToken  | string  | Yes      | The updated Twilio Auth Token |
-| fromNumber | string  | Yes      | The updated Twilio phone number |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| accountSID | string | Yes | Updated Twilio Account SID |
+| authToken | string | Yes | Updated Twilio Auth Token |
+| fromNumber | string | Yes | Updated Twilio Phone Number |
+| user_id | string | Yes | UUID of the user who owns the account |
 
 ### Example Request
 
 ```json
 {
-    "user_id": "c99f0ac3-a143-4be9-ad80-3f59cd04d712",
-    "accountSID": "updated accountSID",
-    "authToken": "updated authToken",
-    "fromNumber": "updated phone number",
-    "id": "31"
+    "accountSID": "updated_account_sid",
+    "authToken": "updated_auth_token",
+    "fromNumber": "+1234567890",
+    "user_id": "user-uuid"
 }
 ```
 
@@ -44,16 +48,14 @@ Content-Type: application/json
 ```json
 {
     "status": "success",
-    "data": [
-        {
-            "id": 31,
-            "user_id": "c99f0ac3-a143-4be9-ad80-3f59cd04d712",
-            "account_sid": "updated accountSID",
-            "auth_token": "updated authToken",
-            "from_phone_number": "updated phone number",
-            "created_at": "2025-02-12T13:31:30.004948"
-        }
-    ]
+    "data": {
+        "id": "2bd43cf5-52d9-4917-84f3-c5defd82ccc9",
+        "account_sid": "updated_account_sid",
+        "auth_token": "updated_auth_token",
+        "from_phone_number": "+1234567890",
+        "user_id": "user-uuid",
+        "created_at": "2025-02-12T13:28:58.621609"
+    }
 }
 ```
 
@@ -73,8 +75,6 @@ Content-Type: application/json
     "status": "error",
     "message": "Internal Server Error",
     "error": {
-        // Error details from the database
+        // Supabase error details
     }
 }
-```
-

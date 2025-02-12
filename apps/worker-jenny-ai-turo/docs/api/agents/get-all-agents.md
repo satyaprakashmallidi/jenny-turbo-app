@@ -1,11 +1,11 @@
 # Get All Agents API
 
-Retrieves all non-deleted AI agents for a specific user.
+Retrieves all agents for a specific user.
 
 ## Endpoint
 
 ```http
-GET /api/agent/getAllAgents
+GET /api/agents
 ```
 
 ## Request
@@ -19,7 +19,7 @@ GET /api/agent/getAllAgents
 ### Example Request
 
 ```http
-GET /api/agent/getAllAgents?user_id=c99f0ac3-a143-4be9-ad80-3f59cd04d712
+GET /api/agents?user_id=c99f0ac3-a143-4be9-ad80-3f59cd04d712
 ```
 
 ## Response
@@ -33,7 +33,6 @@ GET /api/agent/getAllAgents?user_id=c99f0ac3-a143-4be9-ad80-3f59cd04d712
         {
             "id": "ec158318-6f50-44b3-9362-9217c3cf92a2",
             "created_at": "2025-02-12T14:10:11.932+00:00",
-            "phone_number": "+13103402765",
             "voice": "11b9ff7d-3245-4333-a5ae-80457d32e7c3",
             "system_prompt": "You are a helpful customer service agent...",
             "user_id": "c99f0ac3-a143-4be9-ad80-3f59cd04d712",
@@ -44,17 +43,15 @@ GET /api/agent/getAllAgents?user_id=c99f0ac3-a143-4be9-ad80-3f59cd04d712
         }
     ]
 }
-```
 
 ### Error Responses
 
-#### Missing Parameters (400 Bad Request)
+#### Missing Parameters (500 Internal Server Error)
 ```json
 {
     "status": "error",
     "message": "Missing parameters"
 }
-```
 
 #### Database Error (500 Internal Server Error)
 ```json
@@ -65,3 +62,4 @@ GET /api/agent/getAllAgents?user_id=c99f0ac3-a143-4be9-ad80-3f59cd04d712
         // Supabase error details
     }
 }
+```

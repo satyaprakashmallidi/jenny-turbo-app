@@ -1,16 +1,16 @@
 # Get Agent API
 
-Retrieves details of a specific AI agent.
+Retrieves a specific agent's details.
 
 ## Endpoint
 
 ```http
-GET /api/agent/getAgent
+GET /api/agent/{id}
 ```
 
 ## Request
 
-### Query Parameters
+### Path Parameters
 
 | Parameter | Type   | Required | Description |
 |-----------|--------|----------|-------------|
@@ -19,7 +19,7 @@ GET /api/agent/getAgent
 ### Example Request
 
 ```http
-GET /api/agent/getAgent?id=ec158318-6f50-44b3-9362-9217c3cf92a2
+GET /api/agent/2bd43cf5-52d9-4917-84f3-c5defd82ccc9
 ```
 
 ## Response
@@ -32,7 +32,6 @@ GET /api/agent/getAgent?id=ec158318-6f50-44b3-9362-9217c3cf92a2
     "data": {
         "id": "ec158318-6f50-44b3-9362-9217c3cf92a2",
         "created_at": "2025-02-12T14:10:11.932+00:00",
-        "phone_number": "+13103402765",
         "voice": "11b9ff7d-3245-4333-a5ae-80457d32e7c3",
         "system_prompt": "You are a helpful customer service agent. Your name is Sarah and you work for TechSupport Inc. Always be polite and professional in your responses.",
         "user_id": "c99f0ac3-a143-4be9-ad80-3f59cd04d712",
@@ -46,19 +45,11 @@ GET /api/agent/getAgent?id=ec158318-6f50-44b3-9362-9217c3cf92a2
 
 ### Error Responses
 
-#### Missing Parameters (500 Internal Server Error)
+#### Bot Not Found (404 Not Found)
 ```json
 {
     "status": "error",
-    "message": "Missing parameters"
-}
-```
-
-#### Bot Not Found or Deleted (404 Not Found)
-```json
-{
-    "status": "error",
-    "message": "Bot not found"
+    "message": "Bot with id 2bd43cf5-52d9-4917-84f3-c5defd82ccc9 not found"
 }
 ```
 
