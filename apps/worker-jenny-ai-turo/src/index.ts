@@ -426,12 +426,11 @@ app.put('/api/twilio/createAccount', async (c) => {
         message: 'Missing parameters',
       }, 500);
     }
-  
+
     const formData = {
       account_sid: accountSID,
       auth_token: authToken,
-      from_number: fromNumber,
-      is_deleted: false,
+      from_phone_number: fromNumber,
     }
     const { data, error } = await supabase
       .from('twilio_credentials')
@@ -483,7 +482,7 @@ app.patch('/api/twilio/updateAccount', async (c) => {
       .update({
         account_sid: accountSID,
         auth_token: authToken,
-        from_number: fromNumber,
+        from_phone_number: fromNumber,
       })
       .eq('id', id)
       .select();
@@ -527,9 +526,7 @@ app.delete('/api/twilio/deleteAccount', async (c) => {
     }
     const { data, error } = await supabase
       .from('twilio_credentials')
-      .update({
-        is_deleted: true
-      })
+      .delete()
       .eq('id', id)
       .select();
 
@@ -555,42 +552,25 @@ app.delete('/api/twilio/deleteAccount', async (c) => {
   }
 })
 
-app.get('/api/twilio/getAccounts', async (c) => {
+app.get('/api/twilio/getAccount', async (c) => {
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
-    const { data, error } = await supabase
-      .from('twilio_credentials')
-      .select();
-    if (error){
-      console.error("Recevied /twilio/getAccount Error",error);
+
+    const id = c.req.query('id')
+    if (!id) {
+      console.error("Recevied /twilio/getAccount Error : Missing parameters");
       return c.json({
         status: 'error',
-        message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
+        message: 'Missing parameters',
+      }, 500);
     }
-    return c.json({
-      status: 'success',
-      data: data ,
-    })
-  }catch(error){
-    console.error("Get Account Error",error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
-  }
-})
-
-app.get('/api/twilio/getAccount/:id', async (c) => {
-  try{
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
     const { data, error } = await supabase
       .from('twilio_credentials')
-      .select();
+      .select()
+      .eq('id', id)
+      .single();
+
     if (error){
       console.error("Recevied /twilio/credentials Error",error);
       return c.json({
@@ -613,24 +593,105 @@ app.get('/api/twilio/getAccount/:id', async (c) => {
   }
 })
 
-app.post('api/agent/create', async (c) => {
+app.get('/api/twilio/getAccounts', async (c) => {
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+
+    const user_id = c.req.query('user_id')
+    if (!user_id) {
+      console.error("Recevied /twilio/getAccount Error : Missing parameters");
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters',
+      }, 500);
+    }
+    
+    const { data, error } = await supabase
+      .from('twilio_credentials')
+      .select()
+      .eq('user_id', user_id)
+      
+    if (error){
+      console.error("Recevied /twilio/getAccount Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: data ,
+    })
+  }catch(error){
+    console.error("Get Account Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+})
+
+app.post('/api/agent/createAgent', async (c) => {
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
     const body = await c.req.json()
-    const { name, twilio_from_number, user_id, voice_id } = body
+    const { name, twilio_from_number, user_id, voice_id, system_prompt } = body
 
+    if (!name || !twilio_from_number || !user_id || !voice_id || !system_prompt) {
+      console.error("Recevied /agent/createAgent Error : Missing parameters",{
+        name : name,
+        twilio_from_number : twilio_from_number,
+        user_id : user_id,
+        voice_id : voice_id,
+        system_prompt : system_prompt
+      });
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters',
+        error: {
+          name : name,
+          twilio_from_number : twilio_from_number,
+          user_id : user_id,
+          voice_id : voice_id,
+          system_prompt : system_prompt
+        }
+      }, 500);
+    }
 
+    await fetch('https://api.ultravox.ai/api/voices/' + voice_id, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': c.env.ULTRAVOX_API_KEY,
+      },
+    })
+      .then(res => res.json())  
+      .then(data => {
+        console.log("Ultravox API response:", data);
+      })
+      .catch(error => {
+        console.error("Ultravox API error:", error);
+        return c.json({
+          status: 'error',
+          message: 'Ultravox API error',
+        } , 500);
+      });
+      
     const { data: insertedBot, error } = await supabase
         .from("bots")
         .insert([{
           name,
-          twilio_from_number,
-          voice_id,
+          phone_number: twilio_from_number,
+          voice :voice_id,
           is_deleted: false,
           created_at: new Date(),
           is_appointment_booking_allowed: false,
           user_id: user_id,
+          system_prompt: system_prompt,
         }])
         .select()
         .single();
@@ -657,19 +718,20 @@ app.post('api/agent/create', async (c) => {
   }
 })
 
-app.post('api/agent/update',async (c)=>{
+app.post('/api/agent/updateAgent',async (c)=>{
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
     const body = await c.req.json()
-    const { id, name, twilio_from_number, voice_id } = body
+    const { id, name, twilio_from_number, voice_id, system_prompt } = body
 
     const { data: insertedBot, error } = await supabase
         .from("bots")
         .update({
           name,
-          twilio_from_number,
-          voice_id,
+          phone_number: twilio_from_number,
+          voice :voice_id,
+          system_prompt: system_prompt,
         })
         .eq('id', id)
         .select()
@@ -697,12 +759,20 @@ app.post('api/agent/update',async (c)=>{
   }
 })
 
-app.delete('api/agent/delete', async (c) => {
+app.delete('/api/agent/deleteAgent', async (c) => {
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
-    const body = await c.req.json()
-    const { id } = body
+    
+    const id  = c.req.query('id')
+
+    if (!id) {
+      console.error("Recevied /agent/delete Error : Missing parameters");
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters',
+      }, 500);
+    }
 
     const { data: insertedBot, error } = await supabase
         .from("bots")
@@ -735,49 +805,78 @@ app.delete('api/agent/delete', async (c) => {
   }
 }) 
 
-app.get('api/agent/get/:id', async (c) => {
-  try{
+app.get('/api/agent/getAgent', async (c) => {
+  try {
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
-    const { id } = c.req.param()
+    const id  = c.req.query('id')
+    if (!id) {
+      console.error("Recevied /agent/get Error : Missing parameters");
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters',
+      }, 500);
+    }
     const { data: insertedBot, error } = await supabase
-        .from("bots")
-        .select()
-        .eq('id', id)
-        .single();
+      .from("bots")
+      .select()
+      .eq('id', id)
+      .single();
 
-    if (error){
-      console.error("Recevied /agent/get Error",error);
+    if (insertedBot?.is_deleted) {
+      console.error("Recevied /agent/get Error : Bot not found");
+      return c.json({
+        status: 'error',
+        message: 'Bot not found',
+      }, 404);
+    }
+    if (error) {
+      console.error("Recevied /agent/get Error", error);
       return c.json({
         status: 'error',
         message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
+        error: error,
+      }, 500);
     }
     return c.json({
       status: 'success',
-      data: insertedBot ,
+      data: insertedBot,
     })
-  }catch(error){
-    console.error("Recevied /agent/get Error",error);
+  } catch (error) {
+    console.error("Recevied /agent/get Error", error);
     return c.json({
       status: 'error',
       message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
+      error: error,
+    }, 500);
   }
 })
 
-app.get('api/agent/get', async (c) => {
+app.get('/api/agent/getAllAgents', async (c) => {
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
+    
+    const user_id = c.req.query('user_id')
+    
+    if (!user_id) {
+      console.error("Recevied /agent/getAllAgents Error : Missing parameters");
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters',
+      }, 500);
+    }
+
     const { data: insertedBot, error } = await supabase
         .from("bots")
-        .select();
+        .select()
+        .eq('user_id', user_id);
+
+
+    const filteredBots = insertedBot?.filter((bot) => !bot.is_deleted);
 
     if (error){
-      console.error("Recevied /agent/get Error",error);
+      console.error("Recevied /agent/getAllAgents Error",error);
       return c.json({
         status: 'error',
         message: 'Internal Server Error',
@@ -786,7 +885,7 @@ app.get('api/agent/get', async (c) => {
     }
     return c.json({
       status: 'success',
-      data: insertedBot ,
+      data: filteredBots ,
     })
   }catch(error){
     console.error("Recevied /agent/get Error",error);
