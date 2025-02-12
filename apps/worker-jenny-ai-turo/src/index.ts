@@ -5,7 +5,7 @@ import { Env, getEnv } from './config/env'
 import { SupabaseClient } from '@supabase/supabase-js'
 import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
-import { twilioData, ultravoxData } from '@repo/common-types/types'
+import { CallConfig, JoinUrlResponse, twilioData, ultravoxData } from '@repo/common-types/types'
 
 
 //Caching Voices
@@ -203,6 +203,63 @@ app.get('/api/ultravox/voices' , async (c) => {
   
 })
 
+app.get('/api/voices' , async (c) => {
+  try{
+    const now = Date.now();
+    if(cachedVoices && now - lastCacheTime < cacheDuration){
+      console.log("Returning Cached Voices");
+      return c.json({
+        status: 'success',
+        data: cachedVoices
+      });
+    }
+
+    const response = await fetch('https://api.ultravox.ai/api/voices', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': c.env.ULTRAVOX_API_KEY,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText =  response.text();
+      console.error("Ultravox API error:", errorText);
+      return c.json({
+        status: 'error',
+        message: 'Ultravox API error',
+      } , 500);
+    }
+
+    const data  = await response.json();
+    
+    //@ts-ignore
+    const voices = data?.results?.map((voice: any) => {
+      return {
+        voiceId: voice.voiceId,
+        name: voice.name,
+        previewUrl: voice.previewUrl,
+      }
+    })
+
+    cachedVoices = voices;
+    lastCacheTime = now;
+
+    return c.json({
+      status: 'success',
+      data: voices
+    }); 
+
+  }catch(error){
+    console.error("Creating Ultravox Call",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+  
+})
 
 app.post('/api/sendSummary' , async (c) => {
 
@@ -275,12 +332,14 @@ app.get('/api/getSummary' , async (c) => {
     },
   });
 
-  const twilioResp = await response.json();
+  const twilioResp : {
+    shortSummary: string;
+  } = await response.json();
 
-  if(twilioResp && twilioResp?.shortSummary){
+  if(twilioResp){
   
     await supabase.from('summarys').upsert([
-      { call_id: callId , summary: twilioResp?.shortSummary }
+      { call_id: callId , summary: twilioResp?.shortSummary  }
     ], {
       onConflict: 'call_id'
     })
@@ -411,7 +470,7 @@ app.get('/', async (c) => {
   return c.text('Hello Hono! ' + env.SUPABASE_URL)
 })
 
-app.put('/api/twilio/createAccount', async (c) => {
+app.post('/api/twilio', async (c) => {
   try{
 
     const env = getEnv(c.env)
@@ -463,12 +522,15 @@ app.put('/api/twilio/createAccount', async (c) => {
 
 })
 
-app.patch('/api/twilio/updateAccount', async (c) => {
+
+// updating the twilio account
+app.patch('/api/twilio/:id', async (c) => {
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
+    const id = c.req.param('id')
     const body = await c.req.json()
-    const { accountSID, authToken, fromNumber, user_id, id } = body
+    const { accountSID, authToken, fromNumber, user_id } = body
 
     if (!accountSID || !authToken || !fromNumber || !user_id) {
       return c.json({
@@ -551,12 +613,13 @@ app.delete('/api/twilio/deleteAccount', async (c) => {
   }
 })
 
-app.get('/api/twilio/getAccount', async (c) => {
+// getting the twilio account
+app.get('/api/twilio/:id', async (c) => {
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
 
-    const id = c.req.query('id')
+    const id = c.req.param('id')
     if (!id) {
       console.error("Recevied /twilio/getAccount Error : Missing parameters");
       return c.json({
@@ -592,7 +655,8 @@ app.get('/api/twilio/getAccount', async (c) => {
   }
 })
 
-app.get('/api/twilio/getAccounts', async (c) => {
+// getting all the twilio accounts
+app.get('/api/twilios', async (c) => {
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
@@ -633,14 +697,15 @@ app.get('/api/twilio/getAccounts', async (c) => {
   }
 })
 
-app.post('/api/agent/createAgent', async (c) => {
+// creating the agent -> checked
+app.post('/api/agent', async (c) => {
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
     const body = await c.req.json()
-    const { name, twilio_from_number, user_id, voice_id, system_prompt } = body
+    const { name, user_id, voice_id, system_prompt } = body
 
-    if (!name || !twilio_from_number || !user_id || !voice_id || !system_prompt) {
+    if (!name  || !user_id || !voice_id || !system_prompt) {
       console.error("Recevied /agent/createAgent Error : Missing parameters",{
         name : name,
         twilio_from_number : twilio_from_number,
@@ -653,7 +718,6 @@ app.post('/api/agent/createAgent', async (c) => {
         message: 'Missing parameters',
         error: {
           name : name,
-          twilio_from_number : twilio_from_number,
           user_id : user_id,
           voice_id : voice_id,
           system_prompt : system_prompt
@@ -673,10 +737,10 @@ app.post('/api/agent/createAgent', async (c) => {
         console.log("Ultravox API response:", data);
       })
       .catch(error => {
-        console.error("Ultravox API error:", error);
+        console.error("Ultravox Voice API error:", error);
         return c.json({
           status: 'error',
-          message: 'Ultravox API error',
+          message: 'Invalid Voice ID',
         } , 500);
       });
       
@@ -684,7 +748,7 @@ app.post('/api/agent/createAgent', async (c) => {
         .from("bots")
         .insert([{
           name,
-          phone_number: twilio_from_number,
+          phone_number: "",
           voice :voice_id,
           is_deleted: false,
           created_at: new Date(),
@@ -717,7 +781,8 @@ app.post('/api/agent/createAgent', async (c) => {
   }
 })
 
-app.post('/api/agent/updateAgent',async (c)=>{
+// updating the agent
+app.patch('/api/agent',async (c)=>{
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
@@ -758,7 +823,8 @@ app.post('/api/agent/updateAgent',async (c)=>{
   }
 })
 
-app.delete('/api/agent/deleteAgent', async (c) => {
+// deleting the agent
+app.delete('/api/agent', async (c) => {
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
@@ -841,11 +907,12 @@ app.delete('/api/agent/deleteAgent', async (c) => {
   }
 }) 
 
-app.get('/api/agent/getAgent', async (c) => {
+// getting the agent
+app.get('/api/agent/:id', async (c) => {
   try {
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
-    const id  = c.req.query('id')
+    const id  = c.req.param('id')
     if (!id) {
       console.error("Recevied /agent/get Error : Missing parameters");
       return c.json({
@@ -888,7 +955,8 @@ app.get('/api/agent/getAgent', async (c) => {
   }
 })
 
-app.get('/api/agent/getAllAgents', async (c) => {
+// getting all the agents
+app.get('/api/agents', async (c) => {
   try{
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
@@ -934,26 +1002,74 @@ app.get('/api/agent/getAllAgents', async (c) => {
 })
 
 // Add this endpoint before export default app
-app.post('/api/twilio/make-call', async (c) => {
+app.post('/api/twilio/call', async (c) => {
   try {
+    const supabase = getSupabaseClient(c.env);
+
     const body = await c.req.json();
     const {
-      twilioAccountSid,
-      twilioAuthToken,
-      twilioFromNumber,
-      toNumber,
-      botId,
-      userName,
-      userId,
-      appointmentId
+      bot_id : botId,
+      to_number : toNumber,
+      from_number : twilioFromNumber,
+      user_id : userId,// later will add the appointment id or optimise it to tools direckt
     } = body;
 
-    // Validate required parameters
-    if (!twilioAccountSid || !twilioAuthToken || !twilioFromNumber || !toNumber || !botId) {
+    if(!botId || !toNumber || !twilioFromNumber || !userId){
+      console.error("Recevied /twilio/call Error : Missing parameters");
       return c.json({
         status: 'error',
-        message: 'Missing required parameters',
-      }, 400);
+        message: 'Missing parameters',
+      } , 500);
+    }
+
+
+    const { data: bot, error: botError } = await supabase
+      .from('bots')
+      .select(' voice, system_prompt')
+      .eq('id', botId)
+      .eq('user_id', userId)
+      .single();
+
+    if (botError){
+      console.error("Recevied error while fetching the bot details",botError);
+      return c.json({
+        status: 'error',
+        message: 'Bot not found',
+      } , 500);
+    }
+
+    const { data: twilioAccount, error: twilioAccountError } = await supabase
+      .from('twilio_credentials')
+      .select('account_sid, auth_token')
+      .eq('from_phone_number', twilioFromNumber)
+      .eq('user_id', userId)
+      .single();
+
+    if (twilioAccountError){
+      console.error("Recevied error while fetching the twilio account",twilioAccountError);
+      return c.json({
+        status: 'error',
+        message: 'Twilio Account not found',
+      } , 500);
+    }
+
+    const { account_sid, auth_token } = twilioAccount;
+    const { voice, system_prompt } = bot;
+
+    const callConfig : CallConfig = {
+      systemPrompt: system_prompt,
+      voice: voice,
+      recordingEnabled: true,
+      joinTimeout: "30s",
+      medium: {
+        twilio: {
+        }
+      },
+      selectedTools: [
+        {
+          toolName: "hangUp"
+        }
+      ]
     }
 
     // 1. First create Ultravox call
@@ -963,12 +1079,7 @@ app.post('/api/twilio/make-call', async (c) => {
         'Content-Type': 'application/json',
         'X-API-Key': c.env.ULTRAVOX_API_KEY,
       },
-      body: JSON.stringify({
-        botId,
-        phoneNumber: toNumber,
-        userName,
-        appointmentId
-      }),
+      body: JSON.stringify(callConfig),
     });
 
     if (!ultravoxResponse.ok) {
@@ -976,25 +1087,23 @@ app.post('/api/twilio/make-call', async (c) => {
       throw new Error(`Ultravox API error: ${errorText}`);
     }
 
-    const ultravoxData : ultravoxData = await ultravoxResponse.json();
+    const ultravoxData : JoinUrlResponse = await ultravoxResponse.json();
 
+    const joinUrl = ultravoxData?.joinUrl;
     const ultravoxCallId = ultravoxData?.callId;
 
     // 2. Create Twilio call and connect it to Ultravox
-    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Calls.json`;
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${account_sid}/Calls.json`;
     const twilioResponse = await fetch(twilioUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': 'Basic ' + btoa(`${twilioAccountSid}:${twilioAuthToken}`)
+        'Authorization': 'Basic ' + btoa(`${account_sid}:${auth_token}`)
       },
       body: new URLSearchParams({
         To: toNumber,
         From: twilioFromNumber,
-        Url: `https://api.ultravox.ai/api/twilio/connect?callId=${ultravoxCallId}`,
-        StatusCallback: `${c.env.BASE_URL}/api/twilio/webhook`,
-        StatusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'].join(' '),
-        StatusCallbackMethod: 'POST'
+        Twiml: `<Response><Connect><Stream url="${joinUrl}" /></Connect></Response>`,
       })
     });
 
@@ -1005,55 +1114,31 @@ app.post('/api/twilio/make-call', async (c) => {
 
     const twilioData : twilioData = await twilioResponse.json();
 
-    // 3. Save call details to database
-    const supabase = getSupabaseClient(c.env);
-    const call_date = new Date().toISOString().split('T')[0];
-
     // Save to user_calls table
-    if (userId) {
-      const { data: existingData } = await supabase
-        .from('user_calls')
-        .select('call_details')
-        .eq('user_id', userId)
-        .eq('call_date', call_date)
-        .single();
-
-      let updatedCallDetails = [];
-      if (existingData) {
-        updatedCallDetails = existingData.call_details || [];
-      }
-      updatedCallDetails.push({
-        [ultravoxCallId]: botId
-      });
-
-      await supabase
-        .from('user_calls')
-        .upsert([{
-          user_id: userId,
-          call_date,
-          call_details: updatedCallDetails,
-        }], { onConflict: 'user_id, call_date' });
-    }
-
-    // Save initial call status
-    await supabase
-      .from('call_logs')
-      .insert([{
-        call_sid: twilioData.sid,
-        ultravox_call_id: ultravoxCallId,
+    const addCallToDbResponse = await fetch('https://jenny-ai-turo.everyai-com.workers.dev/api/add-call-to-db', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': c.env.ULTRAVOX_API_KEY,
+      },
+      body: JSON.stringify({
+        call_id: ultravoxCallId,
         bot_id: botId,
-        user_id: userId,
-        status: twilioData.status,
-        from_number: twilioFromNumber,
-        to_number: toNumber,
-        created_at: new Date().toISOString()
-      }]);
+        user_id: userId
+      })
+    })
+
+    if (!addCallToDbResponse.ok) {
+      const errorText = await addCallToDbResponse.text();
+      console.error("Recevied error while adding the call to the db",errorText);
+    }
 
     return c.json({
       status: 'success',
       data: {
-        twilioCallSid: twilioData.sid,
-        ultravoxCallId: ultravoxCallId,
+        from_number: twilioFromNumber,
+        to_number: toNumber,
+        bot_id: botId,
         status: twilioData.status
       }
     });
