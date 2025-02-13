@@ -366,7 +366,7 @@ app.get('/api/getSummary' , async (c) => {
 app.post('/api/add-call-to-db' , async (c) => {
   const body = await c.req.json();
 
-  const { user_id , call_id , bot_id } = body;
+  const { user_id , call_id , bot_id , placeholders } = body;
   const call_date = new Date().toISOString().split('T')[0];
 
   const supabase = getSupabaseClient(c.env);
@@ -384,9 +384,15 @@ app.post('/api/add-call-to-db' , async (c) => {
     if (existingData) {
       updatedCallDetails = existingData.call_details || [];
     } 
-    updatedCallDetails.push({
-      [call_id]: bot_id
-    });  // Append new call to array
+    updatedCallDetails.push(
+      placeholders ?
+      {[call_id]: {
+        bot_id: bot_id,
+        placeholders: placeholders
+      }}
+      :
+      {[call_id]:  bot_id}
+    );  // Append new call to array
 
     // Upsert updated data
     const { data, error } = await supabase
@@ -1064,6 +1070,7 @@ app.post('/api/twilio/call', async (c) => {
       const regexPattern = new RegExp(`${leftDelimiter}(\\w+)${rightDelimiter}`, 'g');
       system_prompt = system_prompt.replace(regexPattern, (match: string, key: string) => placeholders[key] || match);
     }
+
     const callConfig : CallConfig = {
       systemPrompt: system_prompt,
       voice: voice,
@@ -1127,12 +1134,12 @@ app.post('/api/twilio/call', async (c) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-Key': c.env.ULTRAVOX_API_KEY,
       },
       body: JSON.stringify({
         call_id: ultravoxCallId,
         bot_id: botId,
-        user_id: userId
+        user_id: userId,
+        placeholders: placeholders
       })
     })
 
