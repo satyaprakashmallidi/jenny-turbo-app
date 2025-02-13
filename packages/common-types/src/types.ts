@@ -193,4 +193,54 @@ export interface CalendarAccount {
     status: 'pending' | 'confirmed' | 'cancelled';
     created_at: string;
   }
+  export interface twilioData{
+    sid: string;
+    ultravox_call_id: string;
+    bot_id: string;
+    user_id: string | null;
+    status: string;
+    from_number: string;
+    to_number: string;
+    created_at: string;
+  }
+
+  export interface JoinUrlResponse {
+  callId: string;
+  created: Date;
+  ended: Date | null;
+  model: string;
+  systemPrompt: string;
+  temperature: number;
+  joinUrl: string;
+}
+
+export interface CallConfig {
+  systemPrompt: string;
+  model?: string;
+  languageHint?: string;
+  selectedTools?: SelectedTool[];
+  initialMessages?: Message[];
+  voice?: string;
+  temperature?: number;
+  maxDuration?: string;
+  joinTimeout?: string;
+  timeExceededMessage?: string;
+  callKey?: string;
+  recordingEnabled?: boolean;
+  medium?: {
+    twilio?: {};
+  };
+  botId?: string | null;
+}
   
+  export interface ultravoxData{
+    call_sid: string;
+    ultravox_call_id: string;
+    bot_id: string;
+    user_id: string | null;
+    status: string;
+    from_number: string;
+    to_number: string;
+    created_at: string;
+    callId: string;
+  }
