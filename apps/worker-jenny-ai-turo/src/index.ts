@@ -1011,6 +1011,7 @@ app.post('/api/twilio/call', async (c) => {
       to_number : toNumber,
       from_number : twilioFromNumber,
       user_id : userId,// later will add the appointment id or optimise it to tools direckt
+      placeholders
     } = body;
 
     if(!botId || !toNumber || !twilioFromNumber || !userId){
@@ -1053,8 +1054,16 @@ app.post('/api/twilio/call', async (c) => {
     }
 
     const { account_sid, auth_token } = twilioAccount;
-    const { voice, system_prompt } = bot;
+    let { voice, system_prompt } = bot;
 
+    // replace the placeholders in the system prompt
+    // with <<<name>>> as the placeholder in the system prompt
+    if(placeholders){
+      let leftDelimiter = placeholders?.left_delimeter || "<<<";
+      let rightDelimiter = placeholders?.right_delimeter || ">>>";
+      const regexPattern = new RegExp(`${leftDelimiter}(\\w+)${rightDelimiter}`, 'g');
+      system_prompt = system_prompt.replace(regexPattern, (match: string, key: string) => placeholders[key] || match);
+    }
     const callConfig : CallConfig = {
       systemPrompt: system_prompt,
       voice: voice,
