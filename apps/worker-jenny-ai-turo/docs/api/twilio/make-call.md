@@ -15,7 +15,13 @@ POST /api/twilio/call
     "bot_id": "bot-uuid",
     "to_number": "+1234567890",
     "from_number": "+0987654321",
-    "user_id": "user-uuid"
+    "user_id": "user-uuid",
+    "placeholders": {
+        "left_delimeter": "<<<",
+        "right_delimeter": ">>>",
+        "key1": "value1",
+        "key2": "value2"
+    }
 }
 ```
 
@@ -25,6 +31,7 @@ POST /api/twilio/call
 | to_number | string | Yes | Phone number to call |
 | from_number | string | Yes | Twilio phone number to use as caller ID |
 | user_id | string | Yes | UUID of the user making the call |
+| placeholders | object | No | Optional object containing placeholder values to replace in the system prompt. The default delimiters are "<<<" and ">>>". Example: if system prompt contains "Hello <<<name>>>", and placeholders contains {"name": "John"}, the final prompt will be "Hello John" |
 
 ### Success Response (200 OK)
 
