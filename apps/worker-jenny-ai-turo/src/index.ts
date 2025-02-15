@@ -514,13 +514,13 @@ app.post('/api/twilio/account', async (c) => {
       }, 500);
     }
 
-    if(data?.user_id) {
-      delete data.user_id;
+    if(data[0]?.user_id) {
+      delete data[0].user_id;
     }
 
     return c.json({
       status: 'success',
-      data: data,
+      data: data[0],
     })
   } catch(error) {
     console.error("Create Account Error", error);
@@ -538,9 +538,9 @@ app.patch('/api/twilio/account/:id', async (c) => {
     const supabase = getSupabaseClient(env);
     const id = c.req.param('id')
     const body = await c.req.json()
-    const { account_name, account_sid, auth_token } = body
+    const { account_name, account_sid, auth_token , user_id } = body
 
-    if (!account_name || !account_sid || !auth_token) {
+    if (!account_name || !account_sid || !auth_token || !user_id) {
       return c.json({
         status: 'error',
         message: 'Missing parameters',
@@ -555,6 +555,7 @@ app.patch('/api/twilio/account/:id', async (c) => {
         auth_token
       })
       .eq('id', id)
+      .eq('user_id', user_id)
       .select();
 
     if (error) {
@@ -566,13 +567,13 @@ app.patch('/api/twilio/account/:id', async (c) => {
       }, 500);
     }
 
-    if(data?.user_id) {
-      delete data.user_id;
+    if(data[0]?.user_id) {
+      delete data[0].user_id; 
     }
 
     return c.json({
       status: 'success',
-      data: data,
+      data: data[0],
     })
   } catch(error) {
     console.error("Update Account Error", error);
@@ -593,29 +594,6 @@ app.delete('/api/twilio/account/:id', async (c) => {
     const body = await c.req.json()
     
     const { user_id } = body;
-
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('id')
-      .eq('id', user_id)
-      .single();
-
-    if (userError) {
-      console.error("Received /twilio/account/delete Error", userError);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error While Getting User',
-        error: userError,
-      }, 500);
-    }
-
-    if (!user) {
-      console.error("User not found");
-      return c.json({
-        status: 'error',
-        message: 'User not found',
-      }, 404);
-    }
 
     const { data, error } = await supabase
       .from('twilio_account')
@@ -757,32 +735,11 @@ app.post('/api/twilio/phone-number', async (c) => {
       }, 500);
     }
 
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('id')
-      .eq('id', user_id)
-      .single();
-
-    if (userError) {
-      console.error("Received /twilio/phone-number Error", userError);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error While Getting User',
-        error: userError,
-      }, 500);
-    }
-
-    if(!user) {
-      return c.json({
-        status: 'error',
-        message: 'User not found',
-      }, 404);
-    }
-
     const { data: account, error: accountError } = await supabase
       .from('twilio_account')
       .select('id , user_id')
       .eq('id', account_id)
+      .eq('user_id', user_id)
       .single();
 
     if (accountError) {
@@ -801,7 +758,7 @@ app.post('/api/twilio/phone-number', async (c) => {
       }, 404);
     }
     
-    if(account?.user_id !== user?.id) {
+    if(account?.user_id !== user_id) {
       return c.json({
         status: 'error',
         message: 'Unauthorized',
@@ -829,7 +786,7 @@ app.post('/api/twilio/phone-number', async (c) => {
 
     return c.json({
       status: 'success',
-      data: data,
+      data: data[0],
     })
   } catch(error) {
     console.error("Create Phone Number Error", error);
@@ -855,28 +812,6 @@ app.patch('/api/twilio/phone-number/:id', async (c) => {
         message: 'Missing parameters : phone_number, friendly_name, user_id',
       }, 500);
     }
-
-    const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('id')
-    .eq('id', user_id)
-    .single();
-
-  if (userError) {
-    console.error("Received /twilio/phone-number Error", userError);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error While Getting User',
-      error: userError,
-    }, 500);
-  }
-
-  if(!user) {
-    return c.json({
-      status: 'error',
-      message: 'User not found',
-    }, 404);
-  }
 
   let { data: accountDetails , error: accountDetailsError } = await supabase
     .from('twilio_phone_numbers')
@@ -915,7 +850,7 @@ app.patch('/api/twilio/phone-number/:id', async (c) => {
     }, 404);
   }
   
-  if(account?.user_id !== user?.id) {
+  if(account?.user_id !== user_id) {
     return c.json({
       status: 'error',
       message: 'Unauthorized',
@@ -943,7 +878,7 @@ app.patch('/api/twilio/phone-number/:id', async (c) => {
 
     return c.json({
       status: 'success',
-      data: data,
+      data: data[0],
     })
   } catch(error) {
     console.error("Update Phone Number Error", error);
@@ -964,27 +899,6 @@ app.delete('/api/twilio/phone-number/:id', async (c) => {
     const body = await c.req.json()
     const { user_id } = body;
     
-    const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('id')
-    .eq('id', user_id)
-    .single();
-
-  if (userError) {
-    console.error("Received /twilio/phone-number Error", userError);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error While Getting User',
-      error: userError,
-    }, 500);
-  }
-
-  if(!user) {
-    return c.json({
-      status: 'error',
-      message: 'User not found',
-    }, 404);
-  }
 
   const {data : accountDetails , error: accountDetailsError } = await supabase
     .from('twilio_phone_numbers')
@@ -1030,7 +944,7 @@ app.delete('/api/twilio/phone-number/:id', async (c) => {
     }, 404);
   }
   
-  if(account?.user_id !== user?.id) {
+  if(account?.user_id !== user_id) {
     return c.json({
       status: 'error',
       message: 'Unauthorized',
@@ -1055,8 +969,7 @@ app.delete('/api/twilio/phone-number/:id', async (c) => {
     }
 
     return c.json({
-      status: 'success',
-      data: data,
+      status: 'success'
     })
   } catch(error) {
     console.error("Delete Phone Number Error", error);
@@ -1281,7 +1194,7 @@ app.patch('/api/tools/:toolId', async (c) => {
   }
 });
 
-app.delete('/api/tools/:toolId/permanent', async (c) => {
+app.delete('/api/tools/:toolId', async (c) => {
   try {
     const env = getEnv(c.env);
     const toolId = c.req.param('toolId');
