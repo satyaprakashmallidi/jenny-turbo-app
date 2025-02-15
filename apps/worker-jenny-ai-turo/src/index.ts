@@ -476,482 +476,51 @@ app.get('/', async (c) => {
   return c.text('Hello Hono! ' + env.SUPABASE_URL)
 })
 
-app.post('/api/twilio', async (c) => {
-  try{
-
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-  
-    const body = await c.req.json()
-    const { account_sid:accountSID, auth_token:authToken, from_phone_number:fromNumber, user_id } = body
-  
-    if (!accountSID || !authToken || !fromNumber || !user_id) {
-      return c.json({
-        status: 'error',
-        message: 'Missing parameters',
-      }, 500);
-    }
-
-    const formData = {
-      account_sid: accountSID,
-      auth_token: authToken,
-      from_phone_number: fromNumber,
-    }
-    const { data, error } = await supabase
-      .from('twilio_credentials')
-      .insert([{
-        ...formData,
-        user_id: user_id
-      }])
-      .select();
-    if (error){
-      console.error("Recevied /twilio/createAccount Error",error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
-    }
-
-    return c.json({
-      status: 'success',
-      data: data ,
-    })
-  }catch(error){
-    console.error("Create Account Error",error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
-  }
-
-})
-
-
-// updating the twilio account
-app.patch('/api/twilio/:id', async (c) => {
-  try{
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-    const id = c.req.param('id')
-    const body = await c.req.json()
-    const { account_sid:accountSID, auth_token:authToken, from_phone_number:fromNumber, user_id } = body
-
-    if (!accountSID || !authToken || !fromNumber || !user_id) {
-      return c.json({
-        status: 'error',
-        message: 'Missing parameters',
-      }, 500);
-    }
-
-    const { data, error } = await supabase
-      .from('twilio_credentials')
-      .update({
-        account_sid: accountSID,
-        auth_token: authToken,
-        from_phone_number: fromNumber,
-      })
-      .eq('id', id)
-      .select();
-
-    if (error){
-      console.error("Recevied /twilio/updateAccount Error",error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
-    }
-
-    return c.json({
-      status: 'success',
-      data: data ,
-    })
-
-  }catch(error){
-    console.error("Update Account Error",error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
-  }
-})
-
-
-app.delete('/api/twilio/deleteAccount', async (c) => {
-  try{
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-    const id = c.req.query('id')
-    if (!id) {
-      return c.json({
-        status: 'error',
-        message: 'Missing parameters',
-      }, 500);
-    }
-    const { data, error } = await supabase
-      .from('twilio_credentials')
-      .delete()
-      .eq('id', id)
-      .select();
-
-    if (error){
-      console.error("Recevied /twilio/deleteAccount Error",error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
-    }
-    return c.json({
-      status: 'success',
-      data: data ,
-    })
-  }catch(error){
-    console.error("Delete Account Error",error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
-  }
-})
-
-// getting the twilio account
-app.get('/api/twilio/:id', async (c) => {
-  try{
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-
-    const id = c.req.param('id')
-    if (!id) {
-      console.error("Recevied /twilio/getAccount Error : Missing parameters");
-      return c.json({
-        status: 'error',
-        message: 'Missing parameters',
-      }, 500);
-    }
-    const { data, error } = await supabase
-      .from('twilio_credentials')
-      .select()
-      .eq('id', id)
-      .single();
-
-    if (error){
-      console.error("Recevied /twilio/credentials Error",error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
-    }
-    return c.json({
-      status: 'success',
-      data: data ,
-    })
-  }catch(error){
-    console.error("Get Credentials Error",error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
-  }
-})
-
-// getting all the twilio accounts
-app.get('/api/twilios', async (c) => {
-  try{
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-
-    const user_id = c.req.query('user_id')
-    if (!user_id) {
-      console.error("Recevied /twilio/getAccount Error : Missing parameters");
-      return c.json({
-        status: 'error',
-        message: 'Missing parameters',
-      }, 500);
-    }
-    
-    const { data, error } = await supabase
-      .from('twilio_credentials')
-      .select()
-      .eq('user_id', user_id)
-      
-    if (error){
-      console.error("Recevied /twilio/getAccount Error",error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
-    }
-    return c.json({
-      status: 'success',
-      data: data ,
-    })
-  }catch(error){
-    console.error("Get Account Error",error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
-  }
-})
-
-// creating the agent -> checked
-app.post('/api/agent', async (c) => {
-  try{
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-    const body = await c.req.json()
-    const { name, user_id, voice_id, system_prompt } = body
-
-    if (!name  || !user_id || !voice_id || !system_prompt) {
-      console.error("Recevied /agent/createAgent Error : Missing parameters",{
-        name : name,
-        user_id : user_id,
-        voice_id : voice_id,
-        system_prompt : system_prompt
-      });
-      return c.json({
-        status: 'error',
-        message: 'Missing parameters',
-        error: {
-          name : name,
-          user_id : user_id,
-          voice_id : voice_id,
-          system_prompt : system_prompt
-        }
-      }, 500);
-    }
-
-    await fetch('https://api.ultravox.ai/api/voices/' + voice_id, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': c.env.ULTRAVOX_API_KEY,
-      },
-    })
-      .then(res => res.json())  
-      .then(data => {
-        console.log("Ultravox API response:", data);
-      })
-      .catch(error => {
-        console.error("Ultravox Voice API error:", error);
-        return c.json({
-          status: 'error',
-          message: 'Invalid Voice ID',
-        } , 500);
-      });
-      
-    const { data: insertedBot, error } = await supabase
-        .from("bots")
-        .insert([{
-          name,
-          phone_number: "",
-          voice :voice_id,
-          is_deleted: false,
-          created_at: new Date(),
-          is_appointment_booking_allowed: false,
-          user_id: user_id,
-          system_prompt: system_prompt,
-        }])
-        .select()
-        .single();
-
-    if (error){
-      console.error("Recevied /agent/create Error",error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
-    }
-    return c.json({
-      status: 'success',
-      data: insertedBot ,
-    })
-  }catch(error){
-    console.error("Recevied /agent/create Error",error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
-  }
-})
-
-// updating the agent
-app.patch('/api/agent',async (c)=>{
-  try{
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-    const body = await c.req.json()
-    const { id, name, twilio_from_number, voice_id, system_prompt } = body
-
-    const { data: insertedBot, error } = await supabase
-        .from("bots")
-        .update({
-          name,
-          phone_number: twilio_from_number,
-          voice :voice_id,
-          system_prompt: system_prompt,
-        })
-        .eq('id', id)
-        .select()
-        .single();
-
-    if (error){
-      console.error("Recevied /agent/update Error",error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
-    }
-    return c.json({
-      status: 'success',
-      data: insertedBot ,
-    })
-  }catch(error){
-    console.error("Recevied /agent/update Error",error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
-  }
-})
-
-// deleting the agent
-app.delete('/api/agent', async (c) => {
-  try{
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-    
-    const id  = c.req.query('id')
-
-    if (!id) {
-      console.error("Recevied /agent/delete Error : Missing parameters");
-      return c.json({
-        status: 'error',
-        message: 'Missing parameters',
-      }, 500);
-    }
-    const {data: existingBot, error: supabaseError } = await supabase
-        .from("bots")
-        .select()
-        .eq('id', id)
-        .single();
-        
-    if (!existingBot){
-      console.error("Recevied /agent/delete Error : Bot not found");
-      return c.json({
-        status: 'error',
-        message: 'Bot with id ' + id + ' not found',
-      } , 500);
-    }
-    if (existingBot?.is_deleted){
-      console.error("Recevied /agent/delete Error : Bot already deleted");
-      return c.json({
-        status: 'error',
-        message: 'Bot with id ' + id + ' already deleted',
-      } , 500);
-    }
-    if (supabaseError){
-      console.error("Recevied /agent/delete Error", supabaseError);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error:  supabaseError ,
-      } , 500);
-    }
-
-    if (supabaseError){
-      console.error("Recevied /agent/delete Error", supabaseError);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error:  supabaseError ,
-      } , 500);
-    }
-
-    const { data: deletedBot, error } = await supabase
-        .from("bots")
-        .update({
-          is_deleted: true,
-        })
-        .eq('id', id)
-        .select()
-        .single();
-
-    if (error){
-      console.error("Recevied /agent/delete Error",error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
-    }
-    return c.json({
-      status: 'success',
-      data: deletedBot ,
-    })
-  }catch(error){
-    console.error("Recevied /agent/delete Error",error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
-  }
-}) 
-
-// getting the agent
-app.get('/api/agent/:id', async (c) => {
+app.post('/api/twilio/account', async (c) => {
   try {
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
-    const id  = c.req.param('id')
-    if (!id) {
-      console.error("Recevied /agent/get Error : Missing parameters");
+  
+    const body = await c.req.json()
+    const { account_name, account_sid, auth_token, user_id } = body
+  
+    if (!account_name || !account_sid || !auth_token || !user_id) {
       return c.json({
         status: 'error',
         message: 'Missing parameters',
       }, 500);
     }
-    const { data: insertedBot, error } = await supabase
-      .from("bots")
-      .select()
-      .eq('id', id)
-      .single();
 
-    if (insertedBot?.is_deleted) {
-      console.error("Recevied /agent/get Error : Bot not found");
-      return c.json({
-        status: 'error',
-        message: 'Bot not found',
-      }, 404);
-    }
+    const { data, error } = await supabase
+      .from('twilio_account')
+      .insert([{
+        account_name,
+        account_sid,
+        auth_token,
+        user_id,
+        is_active: true
+      }])
+      .select();
+
     if (error) {
-      console.error("Recevied /agent/get Error", error);
+      console.error("Received /twilio/account Error", error);
       return c.json({
         status: 'error',
         message: 'Internal Server Error',
         error: error,
       }, 500);
     }
+
+    if(data?.user_id) {
+      delete data.user_id;
+    }
+
     return c.json({
       status: 'success',
-      data: insertedBot,
+      data: data,
     })
-  } catch (error) {
-    console.error("Recevied /agent/get Error", error);
+  } catch(error) {
+    console.error("Create Account Error", error);
     return c.json({
       status: 'error',
       message: 'Internal Server Error',
@@ -960,53 +529,542 @@ app.get('/api/agent/:id', async (c) => {
   }
 })
 
-// getting all the agents
-app.get('/api/agents', async (c) => {
-  try{
+app.patch('/api/twilio/account/:id', async (c) => {
+  try {
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
-    
-    const user_id = c.req.query('user_id')
-    
-    if (!user_id) {
-      console.error("Recevied /agent/getAllAgents Error : Missing parameters");
+    const id = c.req.param('id')
+    const body = await c.req.json()
+    const { account_name, account_sid, auth_token } = body
+
+    if (!account_name || !account_sid || !auth_token) {
       return c.json({
         status: 'error',
         message: 'Missing parameters',
       }, 500);
     }
 
-    const { data: insertedBot, error } = await supabase
-        .from("bots")
-        .select()
-        .eq('user_id', user_id);
+    const { data, error } = await supabase
+      .from('twilio_account')
+      .update({
+        account_name,
+        account_sid,
+        auth_token
+      })
+      .eq('id', id)
+      .select();
 
-
-    const filteredBots = insertedBot?.filter((bot) => !bot.is_deleted);
-
-    if (error){
-      console.error("Recevied /agent/getAllAgents Error",error);
+    if (error) {
+      console.error("Received /twilio/account/update Error", error);
       return c.json({
         status: 'error',
         message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
+        error: error,
+      }, 500);
     }
+
+    if(data?.user_id) {
+      delete data.user_id;
+    }
+
     return c.json({
       status: 'success',
-      data: filteredBots ,
+      data: data,
     })
-  }catch(error){
-    console.error("Recevied /agent/get Error",error);
+  } catch(error) {
+    console.error("Update Account Error", error);
     return c.json({
       status: 'error',
       message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
+      error: error,
+    }, 500);
   }
 })
 
-// Add this endpoint before export default app
+app.delete('/api/twilio/account/:id', async (c) => {
+  try {
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const id = c.req.param('id')
+
+    const body = await c.req.json()
+    
+    const { user_id } = body;
+
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', user_id)
+      .single();
+
+    if (userError) {
+      console.error("Received /twilio/account/delete Error", userError);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error While Getting User',
+        error: userError,
+      }, 500);
+    }
+
+    if (!user) {
+      console.error("User not found");
+      return c.json({
+        status: 'error',
+        message: 'User not found',
+      }, 404);
+    }
+
+    const { data, error } = await supabase
+      .from('twilio_account')
+      .update({
+        is_active: false
+      })
+      .eq('user_id', user_id)
+      .eq('id', id)
+      .select();
+
+    if (error) {
+      console.error("Received /twilio/account/delete Error", error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error while deleting account',
+        error: error,
+      }, 500);
+    }
+
+    return c.json({
+      status: 'success'
+    })
+  } catch(error) {
+    console.error("Delete Account Error", error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error,
+    }, 500);
+  }
+})
+
+app.get('/api/twilio/account/:id', async (c) => {
+  try {
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const id = c.req.param('id')
+
+    const body = await c.req.json();
+    const { user_id } = body;
+
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', user_id)
+      .single();
+
+    const { data, error } = await supabase
+      .from('twilio_account')
+      .select(`
+        *,
+        twilio_phone_numbers (*)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      console.error("Received /twilio/account Error", error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error: error,
+      }, 500);
+    }
+
+    if(data?.user_id) {
+      delete data.user_id;
+    }
+
+    return c.json({
+      status: 'success',
+      data: data,
+    })
+  } catch(error) {
+    console.error("Get Account Error", error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error,
+    }, 500);
+  }
+})
+
+app.get('/api/twilio/accounts', async (c) => {
+  try {
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const body = await c.req.json()
+    const { user_id } = body
+
+    if (!user_id) {
+      return c.json({
+        status: 'error',
+        message: 'Missing user_id parameter',
+      }, 500);
+    }
+
+    const { data, error } = await supabase
+      .from('twilio_account')
+      .select(`id, account_name, account_sid, auth_token`)
+      .eq('user_id', user_id);
+
+    if (error) {
+      console.error("Received /twilio/accounts Error", error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error: error,
+      }, 500);
+    }
+
+
+    return c.json({
+      status: 'success',
+      data: data,
+    });
+  } catch(error) {
+    console.error("Get Accounts Error", error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error,
+    }, 500);
+  }
+})
+
+app.post('/api/twilio/phone-number', async (c) => {
+  try {
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    
+    const body = await c.req.json()
+    const { account_id, phone_number, friendly_name , user_id } = body
+
+    if (!account_id || !phone_number || !friendly_name || !user_id) {
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters : account_id, phone_number, friendly_name, user_id',
+      }, 500);
+    }
+
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', user_id)
+      .single();
+
+    if (userError) {
+      console.error("Received /twilio/phone-number Error", userError);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error While Getting User',
+        error: userError,
+      }, 500);
+    }
+
+    if(!user) {
+      return c.json({
+        status: 'error',
+        message: 'User not found',
+      }, 404);
+    }
+
+    const { data: account, error: accountError } = await supabase
+      .from('twilio_account')
+      .select('id , user_id')
+      .eq('id', account_id)
+      .single();
+
+    if (accountError) {
+      console.error("Received /twilio/phone-number Error", accountError);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error While Getting Account',
+        error: accountError,
+      }, 500);
+    }
+
+    if(!account) {
+      return c.json({
+        status: 'error',
+        message: 'Account not found',
+      }, 404);
+    }
+    
+    if(account?.user_id !== user?.id) {
+      return c.json({
+        status: 'error',
+        message: 'Unauthorized',
+      }, 401);
+    }
+    
+    const { data, error } = await supabase
+      .from('twilio_phone_numbers')
+      .insert([{
+        account_id,
+        phone_number,
+        friendly_name,
+        is_active: true
+      }])
+      .select();
+
+    if (error) {
+      console.error("Received /twilio/phone-number Error", error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error: error,
+      }, 500);
+    }
+
+    return c.json({
+      status: 'success',
+      data: data,
+    })
+  } catch(error) {
+    console.error("Create Phone Number Error", error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error,
+    }, 500);
+  }
+})
+
+app.patch('/api/twilio/phone-number/:id', async (c) => {
+  try {
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const id = c.req.param('id')
+    const body = await c.req.json()
+    const { phone_number, friendly_name , user_id } = body
+
+    if (!phone_number || !friendly_name || !id || !user_id) {
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters : phone_number, friendly_name, user_id',
+      }, 500);
+    }
+
+    const { data: user, error: userError } = await supabase
+    .from('users')
+    .select('id')
+    .eq('id', user_id)
+    .single();
+
+  if (userError) {
+    console.error("Received /twilio/phone-number Error", userError);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error While Getting User',
+      error: userError,
+    }, 500);
+  }
+
+  if(!user) {
+    return c.json({
+      status: 'error',
+      message: 'User not found',
+    }, 404);
+  }
+
+  let { data: accountDetails , error: accountDetailsError } = await supabase
+    .from('twilio_phone_numbers')
+    .select('id , account_id')
+    .eq('id', id)
+    .single();
+
+  if (accountDetailsError) {
+    console.error("Received /twilio/phone-number Error", accountDetailsError);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error While Getting Account',
+      error: accountDetailsError,
+    }, 500);
+  }
+
+  const { data: account, error: accountError } = await supabase
+    .from('twilio_account')
+    .select('id , user_id')
+    .eq('id', accountDetails?.account_id)
+    .single();
+
+  if (accountError) {
+    console.error("Received /twilio/phone-number Error", accountError);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error While Getting Account',
+      error: accountError,
+    }, 500);
+  }
+
+  if(!account) {
+    return c.json({
+      status: 'error',
+      message: 'Account not found',
+    }, 404);
+  }
+  
+  if(account?.user_id !== user?.id) {
+    return c.json({
+      status: 'error',
+      message: 'Unauthorized',
+    }, 401);
+  }
+  
+
+    const { data, error } = await supabase
+      .from('twilio_phone_numbers')
+      .update({
+        phone_number,
+        friendly_name
+      })
+      .eq('id', id)
+      .select();
+
+    if (error) {
+      console.error("Received /twilio/phone-number/update Error", error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error: error,
+      }, 500);
+    }
+
+    return c.json({
+      status: 'success',
+      data: data,
+    })
+  } catch(error) {
+    console.error("Update Phone Number Error", error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error,
+    }, 500);
+  }
+})
+
+app.delete('/api/twilio/phone-number/:id', async (c) => {
+  try {
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const id = c.req.param('id')
+
+    const body = await c.req.json()
+    const { user_id } = body;
+    
+    const { data: user, error: userError } = await supabase
+    .from('users')
+    .select('id')
+    .eq('id', user_id)
+    .single();
+
+  if (userError) {
+    console.error("Received /twilio/phone-number Error", userError);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error While Getting User',
+      error: userError,
+    }, 500);
+  }
+
+  if(!user) {
+    return c.json({
+      status: 'error',
+      message: 'User not found',
+    }, 404);
+  }
+
+  const {data : accountDetails , error: accountDetailsError } = await supabase
+    .from('twilio_phone_numbers')
+    .select('id , account_id')
+    .eq('id', id)
+    .single();
+
+  if (accountDetailsError) {
+    console.error("Received /twilio/phone-number Error", accountDetailsError);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error While Getting Account Details',
+      error: accountDetailsError,
+    }, 500);
+  }
+
+  if(!accountDetails) {
+    return c.json({
+      status: 'error',
+      message: 'Account Details not found',
+    }, 404);
+  }
+
+  const { data: account, error: accountError } = await supabase
+    .from('twilio_account')
+    .select('id , user_id')
+    .eq('id', accountDetails?.account_id)
+    .single();
+
+  if (accountError) {
+    console.error("Received /twilio/phone-number Error", accountError);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error While Getting Account',
+      error: accountError,
+    }, 500);
+  }
+
+  if(!account) {
+    return c.json({
+      status: 'error',
+      message: 'Account not found',
+    }, 404);
+  }
+  
+  if(account?.user_id !== user?.id) {
+    return c.json({
+      status: 'error',
+      message: 'Unauthorized',
+    }, 401);
+  }
+  
+    const { data, error } = await supabase
+      .from('twilio_phone_numbers')
+      .update({
+        is_active: false
+      })
+      .eq('id', id)
+      .select();
+
+    if (error) {
+      console.error("Received /twilio/phone-number/delete Error", error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error: error,
+      }, 500);
+    }
+
+    return c.json({
+      status: 'success',
+      data: data,
+    })
+  } catch(error) {
+    console.error("Delete Phone Number Error", error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error,
+    }, 500);
+  }
+})
+
 app.post('/api/twilio/call', async (c) => {
   try {
     const supabase = getSupabaseClient(c.env);
@@ -1045,9 +1103,9 @@ app.post('/api/twilio/call', async (c) => {
     }
 
     const { data: twilioAccount, error: twilioAccountError } = await supabase
-      .from('twilio_credentials')
+      .from('twilio_account')
       .select('account_sid, auth_token')
-      .eq('from_phone_number', twilioFromNumber)
+      .eq('id', twilioFromNumber)
       .eq('user_id', userId)
       .single();
 
@@ -1168,7 +1226,6 @@ app.post('/api/twilio/call', async (c) => {
   }
 });
 
-// Add a webhook handler for Twilio status callbacks
 app.post('/api/twilio/webhook', async (c) => {
   try {
     const body = await c.req.parseBody();
@@ -1205,5 +1262,303 @@ app.post('/api/twilio/webhook', async (c) => {
     }, 500);
   }
 });
+
+app.post('/api/agent', async (c) => {
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const body = await c.req.json()
+    const { name, user_id, voice_id, system_prompt } = body
+
+    if (!name  || !user_id || !voice_id || !system_prompt) {
+      console.error("Recevied /agent/createAgent Error : Missing parameters",{
+        name : name,
+        user_id : user_id,
+        voice_id : voice_id,
+        system_prompt : system_prompt
+      });
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters',
+        error: {
+          name : name,
+          user_id : user_id,
+          voice_id : voice_id,
+          system_prompt : system_prompt
+        }
+      }, 500);
+    }
+
+    await fetch('https://api.ultravox.ai/api/voices/' + voice_id, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': c.env.ULTRAVOX_API_KEY,
+      },
+    })
+      .then(res => res.json())  
+      .then(data => {
+        console.log("Ultravox API response:", data);
+      })
+      .catch(error => {
+        console.error("Ultravox Voice API error:", error);
+        return c.json({
+          status: 'error',
+          message: 'Invalid Voice ID',
+        } , 500);
+      });
+      
+    const { data: insertedBot, error } = await supabase
+        .from("bots")
+        .insert([{
+          name,
+          phone_number: "",
+          voice :voice_id,
+          is_deleted: false,
+          created_at: new Date(),
+          is_appointment_booking_allowed: false,
+          user_id: user_id,
+          system_prompt: system_prompt,
+        }])
+        .select()
+        .single();
+
+    if (error){
+      console.error("Recevied /agent/create Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: insertedBot ,
+    })
+  }catch(error){
+    console.error("Recevied /agent/create Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+})
+
+app.patch('/api/agent',async (c)=>{
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const body = await c.req.json()
+    const { id, name, twilio_from_number, voice_id, system_prompt } = body
+
+    const { data: insertedBot, error } = await supabase
+        .from("bots")
+        .update({
+          name,
+          phone_number: twilio_from_number,
+          voice :voice_id,
+          system_prompt: system_prompt,
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+    if (error){
+      console.error("Recevied /agent/update Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: insertedBot ,
+    })
+  }catch(error){
+    console.error("Recevied /agent/update Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+})
+
+app.delete('/api/agent', async (c) => {
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    
+    const id  = c.req.query('id')
+
+    if (!id) {
+      console.error("Recevied /agent/delete Error : Missing parameters");
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters',
+      }, 500);
+    }
+    const {data: existingBot, error: supabaseError } = await supabase
+        .from("bots")
+        .select()
+        .eq('id', id)
+        .single();
+        
+    if (!existingBot){
+      console.error("Recevied /agent/delete Error : Bot not found");
+      return c.json({
+        status: 'error',
+        message: 'Bot with id ' + id + ' not found',
+      } , 500);
+    }
+    if (existingBot?.is_deleted){
+      console.error("Recevied /agent/delete Error : Bot already deleted");
+      return c.json({
+        status: 'error',
+        message: 'Bot with id ' + id + ' already deleted',
+      } , 500);
+    }
+    if (supabaseError){
+      console.error("Recevied /agent/delete Error", supabaseError);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  supabaseError ,
+      } , 500);
+    }
+
+    if (supabaseError){
+      console.error("Recevied /agent/delete Error", supabaseError);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  supabaseError ,
+      } , 500);
+    }
+
+    const { data: deletedBot, error } = await supabase
+        .from("bots")
+        .update({
+          is_deleted: true,
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+    if (error){
+      console.error("Recevied /agent/delete Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: deletedBot ,
+    })
+  }catch(error){
+    console.error("Recevied /agent/delete Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+}) 
+
+app.get('/api/agent/:id', async (c) => {
+  try {
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    const id  = c.req.param('id')
+    if (!id) {
+      console.error("Recevied /agent/get Error : Missing parameters");
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters',
+      }, 500);
+    }
+    const { data: insertedBot, error } = await supabase
+      .from("bots")
+      .select()
+      .eq('id', id)
+      .single();
+
+    if (insertedBot?.is_deleted) {
+      console.error("Recevied /agent/get Error : Bot not found");
+      return c.json({
+        status: 'error',
+        message: 'Bot not found',
+      }, 404);
+    }
+    if (error) {
+      console.error("Recevied /agent/get Error", error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error: error,
+      }, 500);
+    }
+    return c.json({
+      status: 'success',
+      data: insertedBot,
+    })
+  } catch (error) {
+    console.error("Recevied /agent/get Error", error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error,
+    }, 500);
+  }
+})
+
+app.get('/api/agents', async (c) => {
+  try{
+    const env = getEnv(c.env)
+    const supabase = getSupabaseClient(env);
+    
+    const user_id = c.req.query('user_id')
+    
+    if (!user_id) {
+      console.error("Recevied /agent/getAllAgents Error : Missing parameters");
+      return c.json({
+        status: 'error',
+        message: 'Missing parameters',
+      }, 500);
+    }
+
+    const { data: insertedBot, error } = await supabase
+        .from("bots")
+        .select()
+        .eq('user_id', user_id);
+
+
+    const filteredBots = insertedBot?.filter((bot) => !bot.is_deleted);
+
+    if (error){
+      console.error("Recevied /agent/getAllAgents Error",error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error:  error ,
+      } , 500);
+    }
+    return c.json({
+      status: 'success',
+      data: filteredBots ,
+    })
+  }catch(error){
+    console.error("Recevied /agent/get Error",error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error:  error ,
+    } , 500);
+  }
+})
 
 export default app
