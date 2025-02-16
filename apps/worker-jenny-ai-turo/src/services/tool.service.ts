@@ -52,16 +52,6 @@ export class ToolService {
             baseUrlPattern: request?.definition?.http?.baseUrlPattern,
             httpMethod: request?.definition?.http?.httpMethod
           },
-          requirements: {
-            httpSecurityOptions: {
-              options: [
-                {
-                  requirements: {},
-                }
-              ]
-            },
-            requiredParameterOverrides: []
-          },
           timeout: request.definition.timeout,
           precomputable: request.definition.precomputable || false
         }
@@ -118,7 +108,7 @@ export class ToolService {
     try {
       // First update in Ultravox
       const response = await fetch(`${ULTRAVOX_TOOL_URL}/${toolId}`, {
-        method: 'PATCH',
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'X-API-Key': this.env.ULTRAVOX_API_KEY,

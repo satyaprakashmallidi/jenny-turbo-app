@@ -1229,7 +1229,8 @@ app.post('/api/twilio/call', async (c) => {
       to_number : toNumber,
       from_number : twilioFromNumber,
       user_id : userId,// later will add the appointment id or optimise it to tools direckt
-      placeholders
+      placeholders,
+      tools
     } = body;
 
     if(!botId || !toNumber || !twilioFromNumber || !userId){
@@ -1256,10 +1257,32 @@ app.post('/api/twilio/call', async (c) => {
       } , 500);
     }
 
+    const { data: twilioNumber, error: twilioNumberError } = await supabase
+      .from('twilio_phone_numbers')
+      .select('id')
+      .eq('phone_number', twilioFromNumber)
+      .single();
+
+    if (twilioNumberError){
+      console.error("Recevied error while fetching the twilio number",twilioNumberError);
+      return c.json({
+        status: 'error',
+        message: 'Twilio Number not found',
+      } , 500);
+    }
+
+    if (!twilioNumber.id){
+      console.error("Recevied error while fetching the twilio number",twilioNumberError);
+      return c.json({
+        status: 'error',
+        message: 'Twilio Number not found',
+      } , 500);
+    }
+    
     const { data: twilioAccount, error: twilioAccountError } = await supabase
       .from('twilio_account')
       .select('account_sid, auth_token')
-      .eq('id', twilioFromNumber)
+      .eq('id', twilioNumber.id)
       .eq('user_id', userId)
       .single();
 
@@ -1283,6 +1306,12 @@ app.post('/api/twilio/call', async (c) => {
       system_prompt = system_prompt.replace(regexPattern, (match: string, key: string) => placeholders[key] || match);
     }
 
+    const selectedTools = tools.map((id : string) => {
+      return {
+        toolId: id
+      }
+    })
+
     const callConfig : CallConfig = {
       systemPrompt: system_prompt,
       voice: voice,
@@ -1295,7 +1324,8 @@ app.post('/api/twilio/call', async (c) => {
       selectedTools: [
         {
           toolName: "hangUp"
-        }
+        },
+        ...selectedTools
       ]
     }
 
