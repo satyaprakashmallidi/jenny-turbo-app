@@ -1102,7 +1102,7 @@ app.get('/api/tools/:toolId', async (c) => {
   }
 })
 
-app.delete('/api/tools/:toolId', async (c) => {
+app.delete('/api/tools/:toolId/deactivate', async (c) => {
   try {
     const env = getEnv(c.env);
     const toolId = c.req.param('toolId');
