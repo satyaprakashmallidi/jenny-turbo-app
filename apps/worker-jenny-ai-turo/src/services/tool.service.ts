@@ -182,9 +182,12 @@ export class ToolService {
 
       // Filter tools to only include those owned by the user
       const userToolIds = new Set(userTools.map(t => t.tool_id));
+
+      const results = ultravoxTools.results.filter(tool => userToolIds.has(tool.toolId));
       return {
         ...ultravoxTools,
-        results: ultravoxTools.results.filter(tool => userToolIds.has(tool.toolId))
+        total: results.length,
+        results: results
       };
     } catch (error) {
       console.error('Error in getUserTools:', error);
