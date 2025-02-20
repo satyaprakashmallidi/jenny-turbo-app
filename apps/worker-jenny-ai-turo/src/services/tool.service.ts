@@ -46,6 +46,7 @@ export class ToolService {
         definition: {
           modelToolName: request.definition.modelToolName,
           description: request.definition.description,
+          automaticParameters: request.definition.automaticParameters,
           dynamicParameters: request.definition.dynamicParameters,
           staticParameters: request.definition.staticParameters,
           http: {

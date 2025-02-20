@@ -9,7 +9,7 @@ import { CallConfig, JoinUrlResponse, twilioData, ultravoxData } from '@repo/com
 import { ToolService } from './services/tool.service'
 import { CreateToolRequest } from './types/tool.types'
 import twilioRoutes from './routes/twilio.routes'
-
+import { TwilioService } from './services/twilio.service'
 
 //Caching Voices
 let cachedVoices: any = null;
@@ -809,7 +809,7 @@ app.post('/api/tools', async (c) => {
   } catch (error) {
     console.error("Error creating tool:", error);
     return c.json(
-      { error: "Failed to create tool" },
+      { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
     );
   }
@@ -982,193 +982,60 @@ app.delete('/api/tools/:toolId', async (c) => {
   }
 });
 
+app.post('/api/twilio/transfer-call', async (c) => {
+  try {
+    const body = await c.req.json();
+    const callId = c.req.query('call_id');
+    const twilioService = TwilioService.getInstance();
+    const result = await twilioService.transferCall(body, callId);
+    return c.json({
+      status: 'success',
+      data: result
+    });
+  } catch (error) {
+    console.error('Transfer Call Error:', error);
+    return c.json({
+      status: 'error',
+      message: error instanceof Error ? error.message : 'Failed to transfer call',
+    }, 500);
+  }
+});
+
 app.post('/api/twilio/call', async (c) => {
   try {
     const supabase = getSupabaseClient(c.env);
-
     const body = await c.req.json();
     const {
-      bot_id : botId,
-      to_number : toNumber,
-      from_number : twilioFromNumber,
-      user_id : userId,// later will add the appointment id or optimise it to tools direckt
+      bot_id: botId,
+      to_number: toNumber,
+      from_number: twilioFromNumber,
+      user_id: userId,
       placeholders,
       tools
     } = body;
 
-    if(!botId || !toNumber || !twilioFromNumber || !userId){
-      console.error("Recevied /twilio/call Error : Missing parameters");
-      return c.json({
-        status: 'error',
-        message: 'Missing parameters',
-      } , 500);
-    }
-
-
-    const { data: bot, error: botError } = await supabase
-      .from('bots')
-      .select(' voice, system_prompt')
-      .eq('id', botId)
-      .eq('user_id', userId)
-      .single();
-
-    if (botError){
-      console.error("Recevied error while fetching the bot details",botError);
-      return c.json({
-        status: 'error',
-        message: 'Bot not found',
-      } , 500);
-    }
-
-    const { data: twilioNumber, error: twilioNumberError } = await supabase
-      .from('twilio_phone_numbers')
-      .select('id')
-      .eq('phone_number', twilioFromNumber)
-      .single();
-
-    if (twilioNumberError){
-      console.error("Recevied error while fetching the twilio number",twilioNumberError);
-      return c.json({
-        status: 'error',
-        message: 'Twilio Number not found',
-      } , 500);
-    }
-
-    if (!twilioNumber.id){
-      console.error("Recevied error while fetching the twilio number",twilioNumberError);
-      return c.json({
-        status: 'error',
-        message: 'Twilio Number not found',
-      } , 500);
-    }
-    
-    const { data: twilioAccount, error: twilioAccountError } = await supabase
-      .from('twilio_account')
-      .select('account_sid, auth_token')
-      .eq('id', twilioNumber.id)
-      .eq('user_id', userId)
-      .single();
-
-    if (twilioAccountError){
-      console.error("Recevied error while fetching the twilio account",twilioAccountError);
-      return c.json({
-        status: 'error',
-        message: 'Twilio Account not found',
-      } , 500);
-    }
-
-    const { account_sid, auth_token } = twilioAccount;
-    let { voice, system_prompt } = bot;
-
-    // replace the placeholders in the system prompt
-    // with <<<name>>> as the placeholder in the system prompt
-    if(placeholders){
-      let leftDelimiter = placeholders?.left_delimeter || "<<<";
-      let rightDelimiter = placeholders?.right_delimeter || ">>>";
-      const regexPattern = new RegExp(`${leftDelimiter}(\\w+)${rightDelimiter}`, 'g');
-      system_prompt = system_prompt.replace(regexPattern, (match: string, key: string) => placeholders[key] || match);
-    }
-
-    const selectedTools = tools.map((id : string) => {
-      return {
-        toolId: id
-      }
-    })
-
-    const callConfig : CallConfig = {
-      systemPrompt: system_prompt,
-      voice: voice,
-      recordingEnabled: true,
-      joinTimeout: "30s",
-      medium: {
-        twilio: {
-        }
-      },
-      selectedTools: [
-        {
-          toolName: "hangUp"
-        },
-        ...selectedTools
-      ]
-    }
-
-    // 1. First create Ultravox call
-    const ultravoxResponse = await fetch('https://api.ultravox.ai/api/calls', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': c.env.ULTRAVOX_API_KEY,
-      },
-      body: JSON.stringify(callConfig),
+    const twilioService = TwilioService.getInstance();
+    const result = await twilioService.makeCall({
+      botId,
+      toNumber,
+      twilioFromNumber,
+      userId,
+      placeholders,
+      tools,
+      supabase,
+      env: c.env
     });
-
-    if (!ultravoxResponse.ok) {
-      const errorText = await ultravoxResponse.text();
-      throw new Error(`Ultravox API error: ${errorText}`);
-    }
-
-    const ultravoxData : JoinUrlResponse = await ultravoxResponse.json();
-
-    const joinUrl = ultravoxData?.joinUrl;
-    const ultravoxCallId = ultravoxData?.callId;
-
-    // 2. Create Twilio call and connect it to Ultravox
-    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${account_sid}/Calls.json`;
-    const twilioResponse = await fetch(twilioUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': 'Basic ' + btoa(`${account_sid}:${auth_token}`)
-      },
-      body: new URLSearchParams({
-        To: toNumber,
-        From: twilioFromNumber,
-        Twiml: `<Response><Connect><Stream url="${joinUrl}" /></Connect></Response>`,
-      })
-    });
-
-    if (!twilioResponse.ok) {
-      const errorText = await twilioResponse.text();
-      throw new Error(`Twilio API error: ${errorText}`);
-    }
-
-    const twilioData : twilioData = await twilioResponse.json();
-
-    // Save to user_calls table
-    const addCallToDbResponse = await fetch('https://jenny-ai-turo.everyai-com.workers.dev/api/add-call-to-db', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        call_id: ultravoxCallId,
-        bot_id: botId,
-        user_id: userId,
-        placeholders: placeholders
-      })
-    })
-
-    if (!addCallToDbResponse.ok) {
-      const errorText = await addCallToDbResponse.text();
-      console.error("Recevied error while adding the call to the db",errorText);
-    }
 
     return c.json({
       status: 'success',
-      data: {
-        from_number: twilioFromNumber,
-        to_number: toNumber,
-        bot_id: botId,
-        status: twilioData.status
-      }
+      data: result
     });
 
   } catch (error) {
     console.error('Make Call Error:', error);
     return c.json({
       status: 'error',
-      message: 'Failed to make call',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      message: error instanceof Error ? error.message : 'Failed to make call',
     }, 500);
   }
 });

@@ -202,6 +202,10 @@ export interface CalendarAccount {
     from_number: string;
     to_number: string;
     created_at: string;
+    account_sid: string;
+    phone_number_sid: string
+    to: string;
+    to_formatted: string;
   }
 
   export interface JoinUrlResponse {
