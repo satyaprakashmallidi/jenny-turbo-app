@@ -6,7 +6,10 @@ import { SupabaseClient } from '@supabase/supabase-js'
 import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
 import { CallConfig, JoinUrlResponse, twilioData, ultravoxData } from '@repo/common-types/types'
-
+import { ToolService } from './services/tool.service'
+import { CreateToolRequest } from './types/tool.types'
+import twilioRoutes from './routes/twilio.routes'
+import { TwilioService } from './services/twilio.service'
 
 //Caching Voices
 let cachedVoices: any = null;
@@ -20,7 +23,7 @@ const app = new Hono<{ Bindings: Env }>();
 //Extend HonoRequest to Include SupaabaseClient
 declare module 'hono' {
   interface HonoRequest {
-    db: SupabaseClient,
+    db: SupabaseClient<any, 'public', any>,
     env: Env
   }
 }
@@ -94,6 +97,9 @@ const injectDB = createMiddleware(async (c, next) => {
 app.use('/*', cors(corsOptions))
 app.use('/*', errorHandler)
 app.use('/*', injectEnv)
+app.use('/*', injectDB)
+
+app.route('/api/twilio', twilioRoutes);
 
 app.post('/api/ultravox/createcall' , async (c) => {
   
@@ -476,268 +482,6 @@ app.get('/', async (c) => {
   return c.text('Hello Hono! ' + env.SUPABASE_URL)
 })
 
-app.post('/api/twilio/account', async (c) => {
-  try {
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-  
-    const body = await c.req.json()
-    const { account_name, account_sid, auth_token, user_id } = body
-  
-    if (!account_name || !account_sid || !auth_token || !user_id) {
-      return c.json({
-        status: 'error',
-        message: 'Missing parameters',
-      }, 500);
-    }
-
-    const { data, error } = await supabase
-      .from('twilio_account')
-      .insert([{
-        account_name,
-        account_sid,
-        auth_token,
-        user_id,
-        is_active: true
-      }])
-      .select();
-
-    if (error) {
-      console.error("Received /twilio/account Error", error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error: error,
-      }, 500);
-    }
-
-    if(data?.user_id) {
-      delete data.user_id;
-    }
-
-    return c.json({
-      status: 'success',
-      data: data,
-    })
-  } catch(error) {
-    console.error("Create Account Error", error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error: error,
-    }, 500);
-  }
-})
-
-app.patch('/api/twilio/account/:id', async (c) => {
-  try {
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-    const id = c.req.param('id')
-    const body = await c.req.json()
-    const { account_name, account_sid, auth_token } = body
-
-    if (!account_name || !account_sid || !auth_token) {
-      return c.json({
-        status: 'error',
-        message: 'Missing parameters',
-      }, 500);
-    }
-
-    const { data, error } = await supabase
-      .from('twilio_account')
-      .update({
-        account_name,
-        account_sid,
-        auth_token
-      })
-      .eq('id', id)
-      .select();
-
-    if (error) {
-      console.error("Received /twilio/account/update Error", error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error: error,
-      }, 500);
-    }
-
-    if(data?.user_id) {
-      delete data.user_id;
-    }
-
-    return c.json({
-      status: 'success',
-      data: data,
-    })
-  } catch(error) {
-    console.error("Update Account Error", error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error: error,
-    }, 500);
-  }
-})
-
-app.delete('/api/twilio/account/:id', async (c) => {
-  try {
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-    const id = c.req.param('id')
-
-    const body = await c.req.json()
-    
-    const { user_id } = body;
-
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('id')
-      .eq('id', user_id)
-      .single();
-
-    if (userError) {
-      console.error("Received /twilio/account/delete Error", userError);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error While Getting User',
-        error: userError,
-      }, 500);
-    }
-
-    if (!user) {
-      console.error("User not found");
-      return c.json({
-        status: 'error',
-        message: 'User not found',
-      }, 404);
-    }
-
-    const { data, error } = await supabase
-      .from('twilio_account')
-      .update({
-        is_active: false
-      })
-      .eq('user_id', user_id)
-      .eq('id', id)
-      .select();
-
-    if (error) {
-      console.error("Received /twilio/account/delete Error", error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error while deleting account',
-        error: error,
-      }, 500);
-    }
-
-    return c.json({
-      status: 'success'
-    })
-  } catch(error) {
-    console.error("Delete Account Error", error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error: error,
-    }, 500);
-  }
-})
-
-app.get('/api/twilio/account/:id', async (c) => {
-  try {
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-    const id = c.req.param('id')
-
-    const body = await c.req.json();
-    const { user_id } = body;
-
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('id')
-      .eq('id', user_id)
-      .single();
-
-    const { data, error } = await supabase
-      .from('twilio_account')
-      .select(`
-        *,
-        twilio_phone_numbers (*)
-      `)
-      .eq('id', id)
-      .single();
-
-    if (error) {
-      console.error("Received /twilio/account Error", error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error: error,
-      }, 500);
-    }
-
-    if(data?.user_id) {
-      delete data.user_id;
-    }
-
-    return c.json({
-      status: 'success',
-      data: data,
-    })
-  } catch(error) {
-    console.error("Get Account Error", error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error: error,
-    }, 500);
-  }
-})
-
-app.get('/api/twilio/accounts', async (c) => {
-  try {
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-    const body = await c.req.json()
-    const { user_id } = body
-
-    if (!user_id) {
-      return c.json({
-        status: 'error',
-        message: 'Missing user_id parameter',
-      }, 500);
-    }
-
-    const { data, error } = await supabase
-      .from('twilio_account')
-      .select(`id, account_name, account_sid, auth_token`)
-      .eq('user_id', user_id);
-
-    if (error) {
-      console.error("Received /twilio/accounts Error", error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error: error,
-      }, 500);
-    }
-
-
-    return c.json({
-      status: 'success',
-      data: data,
-    });
-  } catch(error) {
-    console.error("Get Accounts Error", error);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error',
-      error: error,
-    }, 500);
-  }
-})
 
 app.post('/api/twilio/phone-number', async (c) => {
   try {
@@ -754,32 +498,11 @@ app.post('/api/twilio/phone-number', async (c) => {
       }, 500);
     }
 
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('id')
-      .eq('id', user_id)
-      .single();
-
-    if (userError) {
-      console.error("Received /twilio/phone-number Error", userError);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error While Getting User',
-        error: userError,
-      }, 500);
-    }
-
-    if(!user) {
-      return c.json({
-        status: 'error',
-        message: 'User not found',
-      }, 404);
-    }
-
     const { data: account, error: accountError } = await supabase
       .from('twilio_account')
       .select('id , user_id')
       .eq('id', account_id)
+      .eq('user_id', user_id)
       .single();
 
     if (accountError) {
@@ -798,7 +521,7 @@ app.post('/api/twilio/phone-number', async (c) => {
       }, 404);
     }
     
-    if(account?.user_id !== user?.id) {
+    if(account?.user_id !== user_id) {
       return c.json({
         status: 'error',
         message: 'Unauthorized',
@@ -826,7 +549,7 @@ app.post('/api/twilio/phone-number', async (c) => {
 
     return c.json({
       status: 'success',
-      data: data,
+      data: data[0],
     })
   } catch(error) {
     console.error("Create Phone Number Error", error);
@@ -852,28 +575,6 @@ app.patch('/api/twilio/phone-number/:id', async (c) => {
         message: 'Missing parameters : phone_number, friendly_name, user_id',
       }, 500);
     }
-
-    const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('id')
-    .eq('id', user_id)
-    .single();
-
-  if (userError) {
-    console.error("Received /twilio/phone-number Error", userError);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error While Getting User',
-      error: userError,
-    }, 500);
-  }
-
-  if(!user) {
-    return c.json({
-      status: 'error',
-      message: 'User not found',
-    }, 404);
-  }
 
   let { data: accountDetails , error: accountDetailsError } = await supabase
     .from('twilio_phone_numbers')
@@ -912,7 +613,7 @@ app.patch('/api/twilio/phone-number/:id', async (c) => {
     }, 404);
   }
   
-  if(account?.user_id !== user?.id) {
+  if(account?.user_id !== user_id) {
     return c.json({
       status: 'error',
       message: 'Unauthorized',
@@ -940,7 +641,7 @@ app.patch('/api/twilio/phone-number/:id', async (c) => {
 
     return c.json({
       status: 'success',
-      data: data,
+      data: data[0],
     })
   } catch(error) {
     console.error("Update Phone Number Error", error);
@@ -961,27 +662,6 @@ app.delete('/api/twilio/phone-number/:id', async (c) => {
     const body = await c.req.json()
     const { user_id } = body;
     
-    const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('id')
-    .eq('id', user_id)
-    .single();
-
-  if (userError) {
-    console.error("Received /twilio/phone-number Error", userError);
-    return c.json({
-      status: 'error',
-      message: 'Internal Server Error While Getting User',
-      error: userError,
-    }, 500);
-  }
-
-  if(!user) {
-    return c.json({
-      status: 'error',
-      message: 'User not found',
-    }, 404);
-  }
 
   const {data : accountDetails , error: accountDetailsError } = await supabase
     .from('twilio_phone_numbers')
@@ -1027,7 +707,7 @@ app.delete('/api/twilio/phone-number/:id', async (c) => {
     }, 404);
   }
   
-  if(account?.user_id !== user?.id) {
+  if(account?.user_id !== user_id) {
     return c.json({
       status: 'error',
       message: 'Unauthorized',
@@ -1052,8 +732,7 @@ app.delete('/api/twilio/phone-number/:id', async (c) => {
     }
 
     return c.json({
-      status: 'success',
-      data: data,
+      status: 'success'
     })
   } catch(error) {
     console.error("Delete Phone Number Error", error);
@@ -1065,163 +744,298 @@ app.delete('/api/twilio/phone-number/:id', async (c) => {
   }
 })
 
+app.post('/api/tools', async (c) => {
+  try {
+    const env = getEnv(c.env);
+    const body = await c.req.json() as CreateToolRequest;
+    const userId = c.req.query('user_id');
+
+    if (!userId) {
+      return c.json(
+        { error: "user_id is required" },
+        { status: 400 }
+      );
+    }
+    
+    // Validate tool name length
+    if (!body.name || body.name.length > 40) {
+      return c.json(
+        { error: "Tool name is required and must not exceed 40 characters" },
+        { status: 400 }
+      );
+    }
+
+    // Validate modelToolName format
+    if (body.definition?.modelToolName && !/^[a-zA-Z0-9_-]{1,64}$/.test(body.definition.modelToolName)) {
+      return c.json(
+        { error: "modelToolName must match pattern ^[a-zA-Z0-9_-]{1,64}$" },
+        { status: 400 }
+      );
+    }
+
+    // Validate that either http or client is set, but not both
+    if (body.definition?.http && body.definition?.client) {
+      return c.json(
+        { error: "Only one implementation (http or client) should be set" },
+        { status: 400 }
+      );
+    }
+
+    if (!body.definition?.http && !body.definition?.client) {
+      return c.json(
+        { error: "Either http or client implementation must be set" },
+        { status: 400 }
+      );
+    }
+
+    // For client tools, validate only body parameters are used
+    if (body.definition?.client) {
+      const hasNonBodyParams = [...(body.definition.dynamicParameters || []), 
+        ...(body.definition.staticParameters || []), 
+        ...(body.definition.automaticParameters || [])]
+        .some((param) => param.location !== "PARAMETER_LOCATION_BODY");
+
+      if (hasNonBodyParams) {
+        return c.json(
+          { error: "Client tools can only use body parameters" },
+          { status: 400 }
+        );
+      }
+    }
+
+    const toolService = ToolService.getInstance(env, c.req.db);
+    const data = await toolService.createTool(body, userId);
+    return c.json(data);
+  } catch (error) {
+    console.error("Error creating tool:", error);
+    return c.json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
+  }
+});
+
+app.get('/api/tools', async (c) => {
+  try {
+    const env = getEnv(c.env);
+    const userId = c.req.query('user_id');
+
+    if (!userId) {
+      return c.json(
+        { error: "user_id is required" },
+        { status: 400 }
+      );
+    }
+
+    const toolService = ToolService.getInstance(env, c.req.db);
+    const tools = await toolService.getUserTools(userId);
+    return c.json({ tools });
+  } catch (error) {
+    console.error("Error fetching tools:", error);
+    return c.json(
+      { error: "Failed to fetch tools" },
+      { status: 500 }
+    );
+  }
+});
+
+app.get('/api/tools/:toolId', async (c) => {
+  try{
+    const env = getEnv(c.env);
+    const toolId = c.req.param('toolId');
+    const userId = c.req.query('user_id');
+
+    if (!userId) {
+      return c.json(
+        { error: "user_id is required" },
+        { status: 400 }
+      );
+    }
+
+    const toolService = ToolService.getInstance(env, c.req.db);
+    const tool = await toolService.getTool(toolId, userId);
+    return c.json({ tool });
+
+  }catch(error){
+    console.error("Error fetching tool:", error);
+    return c.json(
+      { error: "Failed to fetch tool" },
+      { status: 500 }
+    );
+  }
+})
+
+app.delete('/api/tools/:toolId/deactivate', async (c) => {
+  try {
+    const env = getEnv(c.env);
+    const toolId = c.req.param('toolId');
+    const userId = c.req.query('user_id');
+
+    if (!userId) {
+      return c.json(
+        { error: "user_id is required" },
+        { status: 400 }
+      );
+    }
+
+    const toolService = ToolService.getInstance(env, c.req.db);
+    await toolService.deactivateTool(toolId, userId);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error deactivating tool:", error);
+    return c.json(
+      { error: "Failed to deactivate tool" },
+      { status: 500 }
+    );
+  }
+});
+
+app.patch('/api/tools/:toolId', async (c) => {
+  try {
+    const env = getEnv(c.env);
+    const toolId = c.req.param('toolId');
+    const userId = c.req.query('user_id');
+    const body = await c.req.json() as Partial<CreateToolRequest>;
+
+    if (!userId) {
+      return c.json(
+        { error: "user_id is required" },
+        { status: 400 }
+      );
+    }
+
+    // Validate tool name if provided
+    if (body.name && body.name.length > 40) {
+      return c.json(
+        { error: "Tool name must not exceed 40 characters" },
+        { status: 400 }
+      );
+    }
+
+    // Validate modelToolName if provided
+    if (body.definition?.modelToolName && !/^[a-zA-Z0-9_-]{1,64}$/.test(body.definition.modelToolName)) {
+      return c.json(
+        { error: "modelToolName must match pattern ^[a-zA-Z0-9_-]{1,64}$" },
+        { status: 400 }
+      );
+    }
+
+    // Validate implementation if provided
+    if (body.definition) {
+      if (body.definition.http && body.definition.client) {
+        return c.json(
+          { error: "Only one implementation (http or client) should be set" },
+          { status: 400 }
+        );
+      }
+
+      // For client tools, validate only body parameters are used
+      if (body.definition.client) {
+        const hasNonBodyParams = [...(body.definition.dynamicParameters || []), 
+          ...(body.definition.staticParameters || []), 
+          ...(body.definition.automaticParameters || [])]
+          .some((param) => param.location !== "PARAMETER_LOCATION_BODY");
+
+        if (hasNonBodyParams) {
+          return c.json(
+            { error: "Client tools can only use body parameters" },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
+    const toolService = ToolService.getInstance(env, c.req.db);
+    await toolService.updateTool(toolId, userId, body);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error updating tool:", error);
+    return c.json(
+      { error: "Failed to update tool" },
+      { status: 500 }
+    );
+  }
+});
+
+app.delete('/api/tools/:toolId', async (c) => {
+  try {
+    const env = getEnv(c.env);
+    const toolId = c.req.param('toolId');
+    const userId = c.req.query('user_id');
+
+    if (!userId) {
+      return c.json(
+        { error: "user_id is required" },
+        { status: 400 }
+      );
+    }
+
+    const toolService = ToolService.getInstance(env, c.req.db);
+    await toolService.deleteTool(toolId, userId);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting tool:", error);
+    return c.json(
+      { error: "Failed to delete tool" },
+      { status: 500 }
+    );
+  }
+});
+
+app.post('/api/twilio/transfer-call', async (c) => {
+  try {
+    const body = await c.req.json();
+    const callId = c.req.query('call_id');
+    const twilioService = TwilioService.getInstance();
+    const result = await twilioService.transferCall(body, callId);
+    return c.json({
+      status: 'success',
+      data: result
+    });
+  } catch (error) {
+    console.error('Transfer Call Error:', error);
+    return c.json({
+      status: 'error',
+      message: error instanceof Error ? error.message : 'Failed to transfer call',
+    }, 500);
+  }
+});
+
 app.post('/api/twilio/call', async (c) => {
   try {
     const supabase = getSupabaseClient(c.env);
-
     const body = await c.req.json();
     const {
-      bot_id : botId,
-      to_number : toNumber,
-      from_number : twilioFromNumber,
-      user_id : userId,// later will add the appointment id or optimise it to tools direckt
-      placeholders
+      bot_id: botId,
+      to_number: toNumber,
+      from_number: twilioFromNumber,
+      user_id: userId,
+      placeholders,
+      tools
     } = body;
 
-    if(!botId || !toNumber || !twilioFromNumber || !userId){
-      console.error("Recevied /twilio/call Error : Missing parameters");
-      return c.json({
-        status: 'error',
-        message: 'Missing parameters',
-      } , 500);
-    }
-
-
-    const { data: bot, error: botError } = await supabase
-      .from('bots')
-      .select(' voice, system_prompt')
-      .eq('id', botId)
-      .eq('user_id', userId)
-      .single();
-
-    if (botError){
-      console.error("Recevied error while fetching the bot details",botError);
-      return c.json({
-        status: 'error',
-        message: 'Bot not found',
-      } , 500);
-    }
-
-    const { data: twilioAccount, error: twilioAccountError } = await supabase
-      .from('twilio_account')
-      .select('account_sid, auth_token')
-      .eq('id', twilioFromNumber)
-      .eq('user_id', userId)
-      .single();
-
-    if (twilioAccountError){
-      console.error("Recevied error while fetching the twilio account",twilioAccountError);
-      return c.json({
-        status: 'error',
-        message: 'Twilio Account not found',
-      } , 500);
-    }
-
-    const { account_sid, auth_token } = twilioAccount;
-    let { voice, system_prompt } = bot;
-
-    // replace the placeholders in the system prompt
-    // with <<<name>>> as the placeholder in the system prompt
-    if(placeholders){
-      let leftDelimiter = placeholders?.left_delimeter || "<<<";
-      let rightDelimiter = placeholders?.right_delimeter || ">>>";
-      const regexPattern = new RegExp(`${leftDelimiter}(\\w+)${rightDelimiter}`, 'g');
-      system_prompt = system_prompt.replace(regexPattern, (match: string, key: string) => placeholders[key] || match);
-    }
-
-    const callConfig : CallConfig = {
-      systemPrompt: system_prompt,
-      voice: voice,
-      recordingEnabled: true,
-      joinTimeout: "30s",
-      medium: {
-        twilio: {
-        }
-      },
-      selectedTools: [
-        {
-          toolName: "hangUp"
-        }
-      ]
-    }
-
-    // 1. First create Ultravox call
-    const ultravoxResponse = await fetch('https://api.ultravox.ai/api/calls', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': c.env.ULTRAVOX_API_KEY,
-      },
-      body: JSON.stringify(callConfig),
+    const twilioService = TwilioService.getInstance();
+    const result = await twilioService.makeCall({
+      botId,
+      toNumber,
+      twilioFromNumber,
+      userId,
+      placeholders,
+      tools,
+      supabase,
+      env: c.env
     });
-
-    if (!ultravoxResponse.ok) {
-      const errorText = await ultravoxResponse.text();
-      throw new Error(`Ultravox API error: ${errorText}`);
-    }
-
-    const ultravoxData : JoinUrlResponse = await ultravoxResponse.json();
-
-    const joinUrl = ultravoxData?.joinUrl;
-    const ultravoxCallId = ultravoxData?.callId;
-
-    // 2. Create Twilio call and connect it to Ultravox
-    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${account_sid}/Calls.json`;
-    const twilioResponse = await fetch(twilioUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': 'Basic ' + btoa(`${account_sid}:${auth_token}`)
-      },
-      body: new URLSearchParams({
-        To: toNumber,
-        From: twilioFromNumber,
-        Twiml: `<Response><Connect><Stream url="${joinUrl}" /></Connect></Response>`,
-      })
-    });
-
-    if (!twilioResponse.ok) {
-      const errorText = await twilioResponse.text();
-      throw new Error(`Twilio API error: ${errorText}`);
-    }
-
-    const twilioData : twilioData = await twilioResponse.json();
-
-    // Save to user_calls table
-    const addCallToDbResponse = await fetch('https://jenny-ai-turo.everyai-com.workers.dev/api/add-call-to-db', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        call_id: ultravoxCallId,
-        bot_id: botId,
-        user_id: userId,
-        placeholders: placeholders
-      })
-    })
-
-    if (!addCallToDbResponse.ok) {
-      const errorText = await addCallToDbResponse.text();
-      console.error("Recevied error while adding the call to the db",errorText);
-    }
 
     return c.json({
       status: 'success',
-      data: {
-        from_number: twilioFromNumber,
-        to_number: toNumber,
-        bot_id: botId,
-        status: twilioData.status
-      }
+      data: result
     });
 
   } catch (error) {
     console.error('Make Call Error:', error);
     return c.json({
       status: 'error',
-      message: 'Failed to make call',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      message: error instanceof Error ? error.message : 'Failed to make call',
     }, 500);
   }
 });
