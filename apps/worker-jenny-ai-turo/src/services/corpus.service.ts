@@ -585,7 +585,16 @@ export class CorpusService {
         throw error;
       }
 
-      // No need to check database since tables don't exist yet
+      const { error: deleteError } = await this.db
+        .from('knowledgebase')
+        .delete()
+        .eq('corpus_id', corpusId);
+
+      if (deleteError) {
+        console.error('Failed to delete knowledgebase from Supabase:', deleteError);
+        throw new Error(`Failed to delete knowledgebase from Supabase: ${deleteError.message}`);
+      }
+
       console.log('Successfully deleted corpus from Ultravox');
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
