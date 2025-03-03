@@ -5,6 +5,7 @@ const envSchema = z.object({
     SUPABASE_ANON_KEY: z.string(),
     APP_URL: z.string(),
     ULTRAVOX_API_KEY: z.string(),
+    ULTRAVOX_API_URL: z.string().default('https://api.ultravox.ai/api'),
     GOOGLE_CLIENT_ID: z.string(),
     GOOGLE_CLIENT_SECRET: z.string(),
     SUPABASE_SERVICE_ROLE_KEY: z.string(),
@@ -15,6 +16,7 @@ export interface Env {
     SUPABASE_ANON_KEY: string;
     APP_URL: string;
     ULTRAVOX_API_KEY: string;
+    ULTRAVOX_API_URL: string;
     GOOGLE_CLIENT_ID: string;
     GOOGLE_CLIENT_SECRET: string;
     SUPABASE_SERVICE_ROLE_KEY: string;

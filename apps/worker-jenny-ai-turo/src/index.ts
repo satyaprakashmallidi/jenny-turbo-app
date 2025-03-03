@@ -12,6 +12,7 @@ import twilioRoutes from './routes/twilio.routes'
 import { TwilioService } from './services/twilio.service'
 import agentRoutes from './routes/agents.routes'
 import toolRoutes from './routes/tools.routes'
+import corpusRoutes from './routes/corpus.routes'
 
 //Caching Voices
 let cachedVoices: any = null;
@@ -37,10 +38,17 @@ const corsOptions = {
     
     return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
   },
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
-  allowCredentials: true,
-  maxAge: 300,// 5 minutes
+  allowHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-API-Key',
+    'x-user-id',
+    'x-client-id'
+  ],
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  exposeHeaders: ['Content-Length', 'X-Kuma-Revision'],
+  maxAge: 600,
+  credentials: true
 }
 
 //Error Handler
@@ -104,6 +112,7 @@ app.use('/*', injectDB)
 app.route('/api/twilio', twilioRoutes);
 app.route('/api/agent', agentRoutes);
 app.route('/api/tools', toolRoutes);
+app.route('/api/knowledgebase', corpusRoutes);
 
 app.post('/api/ultravox/createcall' , async (c) => {
   
