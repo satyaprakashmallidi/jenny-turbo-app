@@ -266,7 +266,7 @@ export async function getUserKnowledgebases(c: Context) {
   console.log('[GET_USER_KNOWLEDGEBASES] Request received');
   
   try {
-    const userId = c.get('userId');
+    const userId = c.req.query('userId');
     if (!userId) {
       return c.json({ 
         status: 'error',

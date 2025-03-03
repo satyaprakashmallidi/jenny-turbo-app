@@ -33,7 +33,21 @@ export class CorpusService {
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'application/json',
         'text/markdown',
-        'text/csv'
+        'text/csv',
+        'application/jsonl',
+        'application/jsonl.gz',
+        'application/jsonl.bz2',
+        'application/jsonl.zip',
+        'application/jsonl.tar',
+        'application/jsonl.tar.gz',
+        'application/jsonl.tar.bz2',
+        'text/tab-separated-values',
+        'text/tab-separated-values.gz',
+        'text/tab-separated-values.bz2',
+        'text/tab-separated-values.zip',
+        'text/tab-separated-values.tar',
+        'text/tab-separated-values.tar.gz',
+        'text/tab-separated-values.tar.bz2',
       ]
     },
     exclude: {
@@ -417,76 +431,145 @@ export class CorpusService {
     try {
       // First check if user has access to this corpus
       const { data: knowledgebase, error: knowledgebaseError } = await this.db
-        .from('knowledgebase')
-        .select('*, knowledgebase_sources(*)')
+        .from('knowledgebase_sources')
+        .select('*')
         .eq('corpus_id', corpusId)
-        .eq('user_id', request.userId)
         .single();
 
       if (knowledgebaseError || !knowledgebase) {
-        throw new Error('Knowledgebase not found or access denied');
+        throw new Error('Knowledgebase not found or access denied', {
+          cause: knowledgebaseError
+        });
       }
 
-      const sourceId = knowledgebase.knowledgebase_sources.source_id;
+      const sourceId = knowledgebase.source_id;
 
-      // Update in Ultravox
-      const updateData: any = {};
-      if (request.name) updateData.name = request.name;
-      if (request.description) updateData.description = request.description;
-      if (request.urls || request.maxDepth || request.maxDocuments || request.maxDocumentBytes) {
-        updateData.loadSpec = {
-          ...(request.urls && { startUrls: request.urls }),
-          ...(request.maxDepth && { maxDepth: request.maxDepth }),
-          ...(request.maxDocuments && { maxDocuments: request.maxDocuments }),
-          ...(request.maxDocumentBytes && { maxDocumentBytes: request.maxDocumentBytes }),
-          relevantDocumentTypes: this.supportedDocTypes, // Always include all supported doc types
-          chunkSize: this.ragConfig.chunkSize,
-          chunkOverlap: this.ragConfig.chunkOverlap
+      // First try to get the current source details to see what we're working with
+      console.log("=============> Fetching current source details...");
+      let sourceDetails;
+      try {
+        const sourceResponse = await axios.get(
+          `${this.baseUrl}/corpora/${corpusId}/sources/${sourceId}`,
+          {
+            headers: {
+              'X-API-Key': this.apiKey,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+        sourceDetails = sourceResponse.data;
+        console.log("=============> Current source details:", JSON.stringify(sourceDetails, null, 2));
+
+        // Check if source is currently updating and wait for it
+        if (sourceDetails.stats.status === "SOURCE_STATUS_UPDATING") {
+          const lastUpdated = new Date(sourceDetails.stats.lastUpdated);
+          const timeSinceUpdate = Math.floor((Date.now() - lastUpdated.getTime()) / 1000 / 60); // minutes
+          throw new Error(
+            `Cannot update the knowledgebase at this time. The source is currently processing ${sourceDetails.loadSpec.startUrls.length} documents ` +
+            `(started ${timeSinceUpdate} minutes ago). Please try again after the current processing is complete.`
+          );
+        }
+
+      } catch (error) {
+        console.error("=============> Failed to fetch source details:", {
+          status: axios.isAxiosError(error) ? error.response?.status : undefined,
+          data: axios.isAxiosError(error) ? error.response?.data : undefined,
+          message: error instanceof Error ? error.message : error
+        });
+        throw error;
+      }
+
+      interface UpdatePayload {
+        name?: string;
+        description?: string;
+        loadSpec: {
+          startUrls: string[];
+          maxDocuments: number;
+          maxDocumentBytes: number;
+          maxDepth: number;
+          relevantDocumentTypes: {
+            include: {
+              mimeTypes: string[];
+            };
+            exclude: {
+              mimeTypes: string[];
+            };
+          };
         };
       }
 
-      await axios.patch(
-        `${this.baseUrl}/corpora/${corpusId}/sources/${sourceId}`,
-        updateData,
-        {
-          headers: {
-            'X-API-Key': this.apiKey,
-            'Content-Type': 'application/json',
-          },
+      const updateData: UpdatePayload = {
+        loadSpec: {
+          startUrls: request.urls || sourceDetails.loadSpec.startUrls, // Keep existing URLs if none provided
+          maxDocuments: request.maxDocuments || sourceDetails.loadSpec.maxDocuments,
+          maxDocumentBytes: request.maxDocumentBytes || sourceDetails.loadSpec.maxDocumentBytes,
+          maxDepth: request.maxDepth || sourceDetails.loadSpec.maxDepth,
+          relevantDocumentTypes: this.supportedDocTypes
         }
-      );
+      };
 
-      // Update in Supabase
-      if (request.name || request.description) {
-        await this.db
-          .from('knowledgebase')
-          .update({
-            ...(request.name && { name: request.name }),
-            ...(request.description && { description: request.description }),
-          })
-          .eq('corpus_id', corpusId);
+      if (request.name) {
+        updateData.name = request.name;
+      }
+      if (request.description !== undefined) {
+        updateData.description = request.description;
       }
 
-      if (request.urls) {
-        await this.db
-          .from('knowledgebase_sources')
-          .update({ source_urls: request.urls })
-          .eq('corpus_id', corpusId);
-      }
+      console.log("=============> Sending update request with payload:", JSON.stringify(updateData, null, 2));
+      console.log("=============> Request URL:", `${this.baseUrl}/corpora/${corpusId}/sources/${sourceId}`);
+      console.log("=============> Request headers:", {
+        'X-API-Key': 'REDACTED',
+        'Content-Type': 'application/json'
+      });
 
-      // Get updated data
-      return this.getKnowledgebase(corpusId, request.userId);
+      try {
+        const response = await axios.patch(
+          `${this.baseUrl}/corpora/${corpusId}/sources/${sourceId}`,
+          updateData,
+          {
+            headers: {
+              'X-API-Key': this.apiKey,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+
+        console.log("=============> Update response:", {
+          status: response.status,
+          statusText: response.statusText,
+          data: response.data
+        });
+
+        if (request.urls) {
+          await this.db
+            .from('knowledgebase_sources')
+            .update({ source_urls: request.urls })
+            .eq('corpus_id', corpusId);
+        }
+
+        return this.getKnowledgebase(corpusId, request.userId);
+      } catch (error) {
+        console.error("=============> Update request failed:", {
+          status: axios.isAxiosError(error) ? error.response?.status : undefined,
+          statusText: axios.isAxiosError(error) ? error.response?.statusText : undefined,
+          data: axios.isAxiosError(error) ? error.response?.data : undefined,
+          headers: axios.isAxiosError(error) ? error.response?.headers : undefined,
+          message: error instanceof Error ? error.message : error
+        });
+        throw new Error(`Failed to update knowledgebase: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
     } catch (error: unknown) {
-      if (axios.isAxiosError(error)) {
-        throw new Error(`Ultravox API error: ${error.response?.data?.message || error.message}`);
-      }
+      console.error("=============> Error details:", {
+        message: error instanceof Error ? error.message : error,
+        response: axios.isAxiosError(error) ? error.response?.data : undefined,
+        stack: error instanceof Error ? error.stack : undefined
+      });
       throw new Error(`Failed to update knowledgebase: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   async deleteKnowledgebase(corpusId: string, userId: string): Promise<void> {
     try {
-      // Delete corpus from Ultravox first
       try {
         await axios.delete(
           `${this.baseUrl}/corpora/${corpusId}`,
