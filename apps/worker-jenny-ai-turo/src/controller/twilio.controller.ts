@@ -1,245 +1,172 @@
 import { Context } from "hono";
-import { getEnv } from "../config/env";
-import { getSupabaseClient } from "../lib/supabase/client";
+import { TwilioService } from "../services/twilio.service";
 
-
-export const getAllAccounts = async (c: Context) => {
-    try {
-      const env = getEnv(c.env)
-      const supabase = getSupabaseClient(env);
-      const body = await c.req.json()
-      const { user_id } = body
-  
-      if (!user_id) {
-        return c.json({
-          status: 'error',
-          message: 'Missing user_id parameter',
-        }, 500);
-      }
-  
-      const { data, error } = await supabase
-        .from('twilio_account')
-        .select(`id, account_name, account_sid, auth_token`)
-        .eq('user_id', user_id);
-  
-      if (error) {
-        console.error("Received /twilio/accounts Error", error);
-        return c.json({
-          status: 'error',
-          message: 'Internal Server Error',
-          error: error,
-        }, 500);
-      }
-  
-  
-      return c.json({
-        status: 'success',
-        data: data,
-      });
-    } catch(error) {
-      console.error("Get Accounts Error", error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error: error,
-      }, 500);
-    }
-}
-
-export const createAccount = async (c: Context) => {
-try {
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-
-    const body = await c.req.json()
-    const { account_name, account_sid, auth_token, user_id } = body
-
-    if (!account_name || !account_sid || !auth_token || !user_id) {
-    return c.json({
-        status: 'error',
-        message: 'Missing parameters',
-    }, 500);
-    }
-
-    const { data, error } = await supabase
-    .from('twilio_account')
-    .insert([{
-        account_name,
-        account_sid,
-        auth_token,
-        user_id,
-        is_active: true
-    }])
-    .select();
-
-    if (error) {
-    console.error("Received /twilio/account Error", error);
-    return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error: error,
-    }, 500);
-    }
-
-    if(data[0]?.user_id) {
-    delete data[0].user_id;
-    }
-
-    return c.json({
-    status: 'success',
-    data: data[0],
-    })
-} catch(error) {
-    console.error("Create Account Error", error);
-    return c.json({
-    status: 'error',
-    message: 'Internal Server Error',
-    error: error,
-    }, 500);
-}
-}
-
-export const updateAccount = async (c: Context) => {
-    try {
-      const env = getEnv(c.env)
-      const supabase = getSupabaseClient(env);
-      const id = c.req.param('id')
-      const body = await c.req.json()
-      const { account_name, account_sid, auth_token , user_id } = body
-  
-      if (!account_name || !account_sid || !auth_token || !user_id) {
-        return c.json({
-          status: 'error',
-          message: 'Missing parameters',
-        }, 500);
-      }
-  
-      const { data, error } = await supabase
-        .from('twilio_account')
-        .update({
-          account_name,
-          account_sid,
-          auth_token
-        })
-        .eq('id', id)
-        .eq('user_id', user_id)
-        .select();
-  
-      if (error) {
-        console.error("Received /twilio/account/update Error", error);
-        return c.json({
-          status: 'error',
-          message: 'Internal Server Error',
-          error: error,
-        }, 500);
-      }
-  
-      if(data[0]?.user_id) {
-        delete data[0].user_id; 
-      }
-  
-      return c.json({
-        status: 'success',
-        data: data[0],
-      })
-    } catch(error) {
-      console.error("Update Account Error", error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error: error,
-      }, 500);
-    }
-}
-
-export const deleteAccount = async (c: Context) => {
-try {
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-    const id = c.req.param('id')
-
-    const body = await c.req.json()
-    
-    const { user_id } = body;
-
-    const { data, error } = await supabase
-    .from('twilio_account')
-    .update({
-        is_active: false
-    })
-    .eq('user_id', user_id)
-    .eq('id', id)
-    .select();
-
-    if (error) {
-    console.error("Received /twilio/account/delete Error", error);
-    return c.json({
-        status: 'error',
-        message: 'Internal Server Error while deleting account',
-        error: error,
-    }, 500);
-    }
-
-    return c.json({
-    status: 'success'
-    })
-} catch(error) {
-    console.error("Delete Account Error", error);
-    return c.json({
-    status: 'error',
-    message: 'Internal Server Error',
-    error: error,
-    }, 500);
-}
-}
-
-export const getAccount = async (c: Context) => {
-try {
-    const env = getEnv(c.env)
-    const supabase = getSupabaseClient(env);
-    const id = c.req.param('id')
-
+export async function makeCall(c: Context) {
+  try {
     const body = await c.req.json();
-    const { user_id } = body;
+    const {
+      bot_id: botId,
+      to_number: toNumber,
+      from_number: twilioFromNumber,
+      user_id: userId,
+      placeholders,
+      tools,
+      transfer_to: transferTo
+    } = body;
 
-    const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('id')
-    .eq('id', user_id)
-    .single();
+    const twilioService = TwilioService.getInstance();
+    twilioService.setDependencies(c.req.db, c.req.env);
 
-    const { data, error } = await supabase
-    .from('twilio_account')
-    .select(`
-        *,
-        twilio_phone_numbers (*)
-    `)
-    .eq('id', id)
-    .single();
 
-    if (error) {
-    console.error("Received /twilio/account Error", error);
+    console.log("Transfering call to: ", transferTo);
+    
+    const result = await twilioService.makeCall({
+      botId,
+      toNumber,
+      twilioFromNumber,
+      userId,
+      placeholders,
+      tools,
+      supabase: c.req.db,
+      env: c.req.env,
+      transferTo
+    });
+
     return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error: error,
+      status: 'success',
+      data: result
+    });
+  } catch (error) {
+    console.error('Make Call Error:', error);
+    return c.json({
+      status: 'error',
+      message: error instanceof Error ? error.message : 'Failed to make call',
     }, 500);
-    }
-
-    if(data?.user_id) {
-    delete data.user_id;
-    }
-
-    return c.json({
-    status: 'success',
-    data: data,
-    })
-} catch(error) {
-    console.error("Get Account Error", error);
-    return c.json({
-    status: 'error',
-    message: 'Internal Server Error',
-    error: error,
-    }, 500);
+  }
 }
+
+export async function transferCall(c: Context) {
+  try {
+    const body = await c.req.json();
+    const callId = c.req.query('call_id');
+    const twilioService = TwilioService.getInstance();
+    twilioService.setDependencies(c.req.db, c.req.env);
+    const result = await twilioService.transferCall(body, callId || "");
+    return c.json({
+      status: 'success',
+      data: result
+    });
+  } catch (error) {
+    console.error('Transfer Call Error:', error);
+    return c.json({
+      status: 'error',
+      message: error instanceof Error ? error.message : 'Failed to transfer call',
+    }, 500);
+  }
+}
+
+export async function handleWebhook(c: Context) {
+  try {
+    const body = await c.req.parseBody();
+    const {
+      CallSid,
+      CallStatus,
+      Duration
+    } = body;
+
+    await c.req.db
+      .from('call_logs')
+      .update({
+        status: CallStatus,
+        duration: Duration,
+        updated_at: new Date().toISOString()
+      })
+      .eq('call_sid', CallSid);
+
+    return c.json({
+      status: 'success',
+      message: 'Webhook processed successfully'
+    });
+  } catch (error) {
+    console.error('Webhook Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Failed to process webhook',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+}
+
+
+export async function finishCall(c: Context) {
+  try {
+    const body = await c.req.json();
+    console.log("Received /finish-call POST Body", body);
+    
+    const twilioService = TwilioService.getInstance();
+    twilioService.setDependencies(c.req.db, c.req.env);
+
+    // Create a promise that resolves when the operation is complete
+    
+      try {
+        const response = await twilioService.finishCall({...body , supabaseClient : c.req.db});
+        console.log("Background finishCall completed successfully" , response);
+        
+        if(!response) {
+          console.error("Background finishCall error: Missing response");
+          return c.json({
+            status: 'error',
+            message: 'Internal Server Error',
+          }, 500);
+        }
+
+        const {userId , TimeTaken , callId} = response;
+
+        console.log("Call ID to delete: ", callId , userId , TimeTaken);
+
+        if(!userId || !TimeTaken) {
+         console.error("Background finishCall error: Missing userId or TimeTaken");
+          return c.json({
+            status: 'error',
+            message: 'Internal Server Error',
+          }, 500);
+        }
+
+        const timeInSeconds = Math.ceil(TimeTaken / 1000); // Convert ms to seconds
+        console.log("Updating pricing for user", userId, "reducing time by", timeInSeconds, "seconds");
+
+        // Use Postgres decrement operation
+        const { data: pricing, error } = await c.req.db.rpc(
+            'decrement_time_rem',
+            { user_id_param: userId, seconds_to_subtract: timeInSeconds }
+        );
+
+        if(error){
+            console.error("Error updating pricing:", error);
+            throw new Error('Failed to update pricing');
+        }
+        console.log("Call deleted successfully", pricing);
+
+        console.log("Successfully updated pricing. New time_rem:", pricing);
+        twilioService.deleteCall(callId);
+
+        
+      } catch (error) {
+        console.error("Background finishCall error:", error);
+        
+      }
+   
+    // Immediately return success response
+    return c.json({
+      status: 'success',
+      message: 'Call finish process initiated'
+    });
+  } catch (error) {
+    console.error("Received /finish-call POST Error", error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error,
+    }, 500);
+  }
 }

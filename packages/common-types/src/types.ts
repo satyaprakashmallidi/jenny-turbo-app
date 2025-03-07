@@ -130,6 +130,30 @@ export interface CalendarAccount {
   interface HttpAuthRequirement {
     scheme: string;
   }
+
+  export interface CallConfigWebhookResponse {
+    callId: string;
+    created: string;
+    joined: string;
+    ended: string;
+    endReason: string;
+    firstSpeaker: string;
+    joinUrl: string;
+    systemPrompt: string;
+    model?: string;
+    languageHint?: string;
+    selectedTools?: SelectedTool[];
+    initialMessages?: Message[];
+    voice?: string;
+    temperature?: number;
+    maxDuration?: string;
+    joinTimeout?: string;
+    summary?: string;
+    shortSummary?: string;
+    medium?: {
+      twilio?: {};
+    };
+  }
   
   export interface CallConfig {
     systemPrompt: string;
