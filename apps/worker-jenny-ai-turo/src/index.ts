@@ -6,6 +6,7 @@ import { CallConfigWebhookResponse } from '@repo/common-types/types';
 import { finishCall } from './controller/twilio.controller';
 import corpusRoutes from './routes/corpus.routes'
 import { CallsManager } from './durable_objects/CallsManager';
+import singleTwilioRoutes from './routes/single-twilio-account.routes'
 
 //Caching Voices
 let cachedVoices: any = null;
@@ -43,6 +44,7 @@ app.route('/api/twilio', twilioRoutes);
 app.route('/api/agent', agentRoutes);
 app.route('/api/tools', toolRoutes);
 app.route('/api/knowledgebase', corpusRoutes);
+app.route('/api/single-twilio', singleTwilioRoutes);
 
 app.post('/api/finish-call', finishCall);
 
