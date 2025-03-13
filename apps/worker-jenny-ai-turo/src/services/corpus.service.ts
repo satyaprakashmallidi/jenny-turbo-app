@@ -161,7 +161,7 @@ export class CorpusService {
   async createCorpus(request: Omit<CreateCorpusRequest, 'urls'>): Promise<any> {
     try {
       // First delete all existing corpora for development
-      await this.deleteAllCorpora();
+      // await this.deleteAllCorpora();
       
       // Add a unique suffix to prevent name conflicts
       const uniqueName = `${request.name}-${request.userId.slice(0, 8)}`;

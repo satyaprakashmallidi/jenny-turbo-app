@@ -114,9 +114,12 @@ export class TwilioService {
         supabase: SupabaseClient;
         env: Env;
         transferTo?: string;
+        isSingleTwilioAccount?: boolean;
     }) {
-        const { botId, toNumber, twilioFromNumber, userId, placeholders, tools, supabase, env, transferTo } = params;
+        const { botId, toNumber, twilioFromNumber, userId, placeholders, tools, supabase, env, transferTo, isSingleTwilioAccount } = params;
 
+        let account_sid = "";
+        let auth_token = "";
         if(!botId || !toNumber || !twilioFromNumber || !userId){
             throw new Error("Missing parameters");
         }
@@ -160,7 +163,24 @@ export class TwilioService {
             throw new Error("Unauthorized to use this Twilio Account");
         }
 
-        const { account_sid, auth_token } = twilioAccount;
+        account_sid = twilioAccount.account_sid;
+        auth_token = twilioAccount.auth_token;
+
+        if(isSingleTwilioAccount){
+            const { data: singleTwilioAccount, error: singleTwilioAccountError } = await supabase
+            .from('twilio_credentials')
+            .select('account_sid, auth_token')
+            .eq('user_id', userId)
+            .single();
+
+            if(singleTwilioAccountError){
+                throw new Error("Twilio Account not found");
+            }
+
+            account_sid = singleTwilioAccount.account_sid;
+            auth_token = singleTwilioAccount.auth_token;
+        }
+
         let { voice, system_prompt } = bot;
 
         // Replace placeholders in system prompt

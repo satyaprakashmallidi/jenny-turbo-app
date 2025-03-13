@@ -11,7 +11,8 @@ export async function makeCall(c: Context) {
       user_id: userId,
       placeholders,
       tools,
-      transfer_to: transferTo
+      transfer_to: transferTo,
+      is_single_twilio_account: isSingleTwilioAccount
     } = body;
 
     const twilioService = TwilioService.getInstance();
@@ -29,7 +30,8 @@ export async function makeCall(c: Context) {
       tools,
       supabase: c.req.db,
       env: c.req.env,
-      transferTo
+      transferTo,
+      isSingleTwilioAccount
     });
 
     return c.json({

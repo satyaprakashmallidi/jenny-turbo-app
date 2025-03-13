@@ -15,7 +15,7 @@ declare module 'hono' {
 
 const corsOptions = {
   origin: (origin: string) => {
-    const ALLOWED_ORIGINS = ['http://localhost:3000', 'https://magicteams.netlify.app']
+    const ALLOWED_ORIGINS = ['http://localhost:3000', 'https://magicteams.netlify.app', 'https://gkt114.ngrok.app']
     return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
   },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
