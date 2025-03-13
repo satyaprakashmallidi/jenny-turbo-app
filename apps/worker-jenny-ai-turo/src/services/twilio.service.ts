@@ -225,11 +225,29 @@ export class TwilioService {
         
         const ultravoxData: JoinUrlResponse = await ultravoxResponse.json();
         const { joinUrl, callId: ultravoxCallId } = ultravoxData;
+
+        let additional_data_to_store_in_call_records: {
+            placeholders?: any;
+            transferTo?: string;
+            isSingleTwilioAccount?: boolean;
+        } = {};
+
+        if(placeholders) {
+            additional_data_to_store_in_call_records.placeholders = placeholders;
+        }
+
+        if(transferTo) {
+            additional_data_to_store_in_call_records.transferTo = transferTo;
+        }
+
+        if(isSingleTwilioAccount) { 
+            additional_data_to_store_in_call_records.isSingleTwilioAccount = true;
+        }
         
         //the call is sucess push it to db
         const { data: pushedCallToCallRecords , error: errorPushedCallToCallRecords  } = await supabase
             .from('call_records')
-            .insert([{ user_id: userId, call_id: ultravoxCallId,  bot_id: botId}])
+            .insert([{ user_id: userId, call_id: ultravoxCallId,  bot_id: botId, additional_data: additional_data_to_store_in_call_records}])
             .select();
 
         if(errorPushedCallToCallRecords) {
