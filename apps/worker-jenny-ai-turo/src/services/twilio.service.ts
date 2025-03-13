@@ -136,26 +136,28 @@ export class TwilioService {
         // Get Twilio number details
         const { data: twilioNumber, error: twilioNumberError } = await supabase
             .from('twilio_phone_numbers')
-            .select('id')
-            .eq('phone_number', twilioFromNumber)
-            .single();
+            .select('id , account_id')
+            .eq('phone_number', twilioFromNumber);
         
             console.log(twilioNumber , "i am getting data from twilio_number table haha");
 
-        if (twilioNumberError || !twilioNumber?.id) {
+        if (twilioNumberError) {
             throw new Error("Twilio Number not found");
         }
 
         // Get Twilio account details
         const { data: twilioAccount, error: twilioAccountError } = await supabase
             .from('twilio_account')
-            .select('account_sid, auth_token')
-            .eq('id', twilioNumber.id)
-            .eq('user_id', userId)
+            .select('account_sid, auth_token , user_id')
+            .eq('id', twilioNumber[0].account_id)
             .single();
 
         if (twilioAccountError) {
-            throw new Error("Twilio Account not found");
+            throw new Error("Twilio Account not found for This User");
+        }
+
+        if(twilioAccount.user_id !== userId) {
+            throw new Error("Unauthorized to use this Twilio Account");
         }
 
         const { account_sid, auth_token } = twilioAccount;
@@ -200,9 +202,19 @@ export class TwilioService {
             const errorText = await ultravoxResponse.text();
             throw new Error(`${errorText}`);
         }
-
+        
         const ultravoxData: JoinUrlResponse = await ultravoxResponse.json();
         const { joinUrl, callId: ultravoxCallId } = ultravoxData;
+        
+        //the call is sucess push it to db
+        const { data: pushedCallToCallRecords , error: errorPushedCallToCallRecords  } = await supabase
+            .from('call_records')
+            .insert([{ user_id: userId, call_id: ultravoxCallId,  bot_id: botId}])
+            .select();
+
+        if(errorPushedCallToCallRecords) {
+          console.error("Error pushing call to call records", errorPushedCallToCallRecords);
+        }
 
         // Create Twilio call
         const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${account_sid}/Calls.json`;
@@ -221,6 +233,10 @@ export class TwilioService {
 
         if (!twilioResponse.ok) {
             const errorText = await twilioResponse.text();
+            const errorData = await JSON.parse(errorText);
+            if(errorData?.code === 20003) {
+                throw new Error(`Wrong Account Sid / Account Suspended`);
+            }
             throw new Error(`Twilio API error: ${errorText}`);
         }
 
