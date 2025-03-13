@@ -1,6 +1,34 @@
 import { Context } from "hono";
 import { TwilioService } from "../services/twilio.service";
 
+
+type CallRecord = {
+  call_id: string;
+  user_id: string;
+  bot_id: string;
+  created_at: string; // ISO timestamp
+  additional_data: Record<string, any>; // JSONB field
+};
+
+type CallDetails = {
+  call_id: string;
+  created?: string; // ISO timestamp
+  joined?: string; // ISO timestamp
+  ended?: string; // ISO timestamp
+  end_reason?: string;
+  short_summary?: string;
+  long_summary?: string;
+  recording_enabled?: string;
+  join_timeout?: string;
+  max_duration?: string;
+  voice?: string;
+  temperature?: string;
+  time_exceeded_message?: string;
+  system_prompt?: string;
+
+};
+
+
 export async function makeCall(c: Context) {
   try {
     const body = await c.req.json();
@@ -99,17 +127,49 @@ export async function handleWebhook(c: Context) {
   }
 }
 
-
 export async function finishCall(c: Context) {
   try {
     const body = await c.req.json();
-    console.log("Received /finish-call POST Body", body);
+
+    const { event , call } = body;
+
+    console.log( "Event", event , "Call", call);
+    
+    if(event && call){
+
+      console.log("inside event call");
+      // we only subscribed to event = call.ended let's see
+      const callDetails : CallDetails = {
+        call_id: call.callId,
+        created: call.created,
+        joined: call.joined,
+        ended: call.ended,
+        end_reason: call.endReason,
+        recording_enabled: call.recordingEnabled,
+        join_timeout: call.joinTimeout,
+        max_duration: call.maxDuration,
+        voice: call.voice,
+        temperature: call.temperature,
+        time_exceeded_message: call.timeExceededMessage,
+        short_summary: call.shortSummary,
+        long_summary: call.summary,
+        system_prompt: call.systemPrompt
+      };
+
+      //importing the call Details to our db
+      console.log("Importing call details to db", callDetails);
+      await c.req.db
+        .from('call_details')
+        .upsert([callDetails] , {
+          onConflict: 'call_id'
+        });
+    }
     
     const twilioService = TwilioService.getInstance();
     twilioService.setDependencies(c.req.db, c.req.env);
 
     // Create a promise that resolves when the operation is complete
-    
+    if(call && call.endReason !== 'unjoined'){
       try {
         const response = await twilioService.finishCall({...body , supabaseClient : c.req.db});
         console.log("Background finishCall completed successfully" , response);
@@ -157,7 +217,7 @@ export async function finishCall(c: Context) {
         console.error("Background finishCall error:", error);
         
       }
-   
+    }
     // Immediately return success response
     return c.json({
       status: 'success',
