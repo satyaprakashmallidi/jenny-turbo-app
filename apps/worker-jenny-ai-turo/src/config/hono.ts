@@ -19,7 +19,7 @@ const corsOptions = {
     return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
   },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
+  allowHeaders: ['Content-Type', 'Authorization', 'x-user-id'],
   allowCredentials: true,
   maxAge: 300,
 }
