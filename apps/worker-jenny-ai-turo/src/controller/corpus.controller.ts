@@ -43,7 +43,7 @@ export async function createCorpus(c: Context<{ Bindings: Env }>) {
     });
 
     const endTime = new Date().toISOString();
-    console.log(`[${endTime}] CREATE_CORPUS: Successfully created corpus with ID: ${result.id}`);
+    console.log(`[${endTime}] CREATE_CORPUS: Successfully created corpus with ID: ${result?.id}`);
     return c.json(result);
   } catch (error) {
     const errorTime = new Date().toISOString();

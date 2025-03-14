@@ -378,7 +378,33 @@ export class CorpusService {
         throw new Error('Knowledgebase not found');
       }
 
-      return knowledgebase;
+      // Get detailed corpus information from Ultravox API
+      try {
+        const ultravoxResponse = await axios.get(
+          `${this.baseUrl}/corpora/${corpusId}`,
+          {
+            headers: {
+              'X-API-Key': this.apiKey,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        
+        // Combine both responses
+        console.log("=============> Ultravox corpus details:", JSON.stringify(ultravoxResponse.data, null, 2));
+        return {
+          ...knowledgebase,
+          corpus_details: ultravoxResponse.data
+        };
+      } catch (ultravoxError) {
+        console.error('Failed to fetch corpus details from Ultravox:', ultravoxError);
+        // Even if Ultravox call fails, return the database info
+        return {
+          ...knowledgebase,
+          corpus_details: null,
+          corpus_error: 'Failed to fetch corpus details from Ultravox API'
+        };
+      }
     } catch (error) {
       throw new Error(`Failed to get knowledgebase: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
@@ -432,13 +458,16 @@ export class CorpusService {
       // First check if user has access to this corpus
       const { data: knowledgebase, error: knowledgebaseError } = await this.db
         .from('knowledgebase_sources')
-        .select('*')
+        .update({
+          source_urls: request.urls,
+        })
         .eq('corpus_id', corpusId)
+        .select()
         .single();
 
       if (knowledgebaseError || !knowledgebase) {
-        throw new Error('Knowledgebase not found or access denied', {
-          cause: knowledgebaseError
+        throw new Error(`Knowledgebase update error: ${knowledgebase}`, {
+          cause: knowledgebaseError,
         });
       }
 
@@ -556,7 +585,7 @@ export class CorpusService {
           headers: axios.isAxiosError(error) ? error.response?.headers : undefined,
           message: error instanceof Error ? error.message : error
         });
-        throw new Error(`Failed to update knowledgebase: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        throw new Error(`Failed to update knowledgebase: ${error instanceof Error ? error.message+ " " + error?.response?.data?.detail : 'Unknown error'}`);
       }
     } catch (error: unknown) {
       console.error("=============> Error details:", {
