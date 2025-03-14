@@ -10,7 +10,7 @@ type CallRecord = {
   additional_data: Record<string, any>; // JSONB field
 };
 
-type CallDetails = {
+export type CallDetails = {
   call_id: string;
   created?: string; // ISO timestamp
   joined?: string; // ISO timestamp
@@ -18,7 +18,7 @@ type CallDetails = {
   end_reason?: string;
   short_summary?: string;
   long_summary?: string;
-  recording_enabled?: string;
+  recording_enabled?: boolean;
   join_timeout?: string;
   max_duration?: string;
   voice?: string;

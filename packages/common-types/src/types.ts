@@ -144,8 +144,10 @@ export interface CalendarAccount {
     languageHint?: string;
     selectedTools?: SelectedTool[];
     initialMessages?: Message[];
+    recordingEnabled?: boolean;
     voice?: string;
-    temperature?: number;
+    timeExceededMessage?: string;
+    temperature?: string;
     maxDuration?: string;
     joinTimeout?: string;
     summary?: string;

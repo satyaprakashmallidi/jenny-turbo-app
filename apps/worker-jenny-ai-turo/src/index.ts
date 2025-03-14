@@ -5,8 +5,8 @@ import toolRoutes from './routes/tools.routes'
 import { CallConfigWebhookResponse } from '@repo/common-types/types';
 import { finishCall } from './controller/twilio.controller';
 import corpusRoutes from './routes/corpus.routes'
-import { CallsManager } from './durable_objects/CallsManager';
 import singleTwilioRoutes from './routes/single-twilio-account.routes'
+import { CallDetails } from './controller/twilio.controller';
 
 //Caching Voices
 let cachedVoices: any = null;
@@ -47,6 +47,106 @@ app.route('/api/knowledgebase', corpusRoutes);
 app.route('/api/single-twilio', singleTwilioRoutes);
 
 app.post('/api/finish-call', finishCall);
+
+app.get('/api/get-call-details' , async (c) => {
+  try {
+    const callId = c.req.query('call_id');
+    
+    if (!callId) {
+      return c.json({
+        status: 'error',
+        message: 'Missing callId',
+      }, 400);
+    }
+
+    const { data, error } = await c.req.db
+      .from('call_details')
+      .select('*')
+      .eq('call_id', callId);
+
+    if (error) {
+      console.error("Get Call Details Error:", error);
+      return c.json({
+        status: 'error',
+        message: 'Internal Server Error',
+        error: error,
+      }, 500);
+    }
+
+    if ((!data || data.length === 0)  || (data[0].endReason !== 'unjoined' && (!data[0].short_summary  || !data[0].long_summary))) {
+      try {
+        const response = await fetch(`https://api.ultravox.ai/api/calls/${callId}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': c.req.env.ULTRAVOX_API_KEY,
+          },
+        });
+
+        if (!response.ok) {
+          return c.json({
+            status: 'error',
+            message: 'Call not found in Main DB',
+          }, 200);
+        }
+
+        const ultravoxResp = await response.json() as CallConfigWebhookResponse;
+        
+        const convert_to_details : CallDetails =  {
+          call_id: callId,
+          created: ultravoxResp.created,
+          joined: ultravoxResp.joined,
+          ended: ultravoxResp.ended,
+          end_reason: ultravoxResp.endReason,
+          recording_enabled: ultravoxResp.recordingEnabled || false,
+          join_timeout: ultravoxResp.joinTimeout,
+          max_duration: ultravoxResp.maxDuration,
+          voice: ultravoxResp.voice,
+          temperature: ultravoxResp.temperature,
+          time_exceeded_message: ultravoxResp.timeExceededMessage,
+          short_summary: ultravoxResp.shortSummary,
+          long_summary: ultravoxResp.summary
+        }
+
+        const { error } = await c.req.db
+          .from('call_details')
+          .upsert([convert_to_details], {
+            onConflict: 'call_id'
+          });
+
+        if (error) {
+          console.error("Error while updating call details to our db", error);
+        }
+
+        return c.json({
+          status: 'success',
+          data: convert_to_details
+        });
+
+      } catch (error) {
+        console.error("Get Call Details From Main DB Error:", error);
+        return c.json({
+          status: 'error',
+          message: 'Internal Server Error',
+          error: error,
+        }, 500);
+      }
+    }
+
+    return c.json({
+      status: 'success',
+      data: data[0]
+    });
+
+  } catch (error) {
+    console.error("Get Call Details Error:", error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error,
+    }, 500);
+  }
+})
 
 app.post('/api/ultravox/createcall', async (c) => {
   try {
