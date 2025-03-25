@@ -51,6 +51,8 @@ export class TwilioService {
             throw new Error("Missing parameters");
         }
 
+        console.log("TwilioService makeCall", twilioFromNumber);
+
         // Get bot details
         const { data: bot, error: botError } = await supabase
             .from('bots')
@@ -66,11 +68,11 @@ export class TwilioService {
         // Get Twilio number details
         const { data: twilioNumber, error: twilioNumberError } = await supabase
             .from('twilio_phone_numbers')
-            .select('id')
+            .select('id , account_id')
             .eq('phone_number', twilioFromNumber)
             .single();
 
-        if (twilioNumberError || !twilioNumber?.id) {
+        if (twilioNumberError || !twilioNumber?.account_id) {
             throw new Error("Twilio Number not found");
         }
 
@@ -78,7 +80,7 @@ export class TwilioService {
         const { data: twilioAccount, error: twilioAccountError } = await supabase
             .from('twilio_account')
             .select('account_sid, auth_token')
-            .eq('id', twilioNumber.id)
+            .eq('id', twilioNumber.account_id)
             .eq('user_id', userId)
             .single();
 

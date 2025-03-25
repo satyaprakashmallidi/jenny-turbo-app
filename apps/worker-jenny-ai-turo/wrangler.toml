@@ -13,10 +13,9 @@ GOOGLE_CLIENT_ID = "923267105233-qjohnl0so1cf2s0le1jo69i3gsbnaqbo.apps.googleuse
 GOOGLE_CLIENT_SECRET = "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"
 SUPABASE_SERVICE_ROLE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVzamRtc2llY2x6ZWhvZ2txbGFnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczMzExMjE5NCwiZXhwIjoyMDQ4Njg4MTk0fQ.zMcR9bMMw4zOdV1hvwtIdCfdyNM9rmOatN2zeKgenUw'
 
-
-# [[kv_namespaces]]
-# binding = "MY_KV_NAMESPACE"
-# id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+[[kv_namespaces]]
+binding = "ACTIVE_CALLS"
+id = "b83dfc8af736463494a20584354e6507"
 
 # [[r2_buckets]]
 # binding = "MY_BUCKET"
