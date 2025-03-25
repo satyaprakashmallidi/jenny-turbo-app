@@ -7,6 +7,7 @@
   "dependencies": {
     "@repo/common-types": "workspace:*",
     "@supabase/supabase-js": "^2.47.10",
+    "axios": "^1.8.4",
     "dotenv": "^16.4.7",
     "hono": "^4.6.15",
     "twilio": "^5.4.5",
