@@ -191,7 +191,25 @@ export class TwilioService {
             system_prompt = system_prompt.replace(regexPattern, (match: string, key: string) => placeholders[key] || match);
         }
 
-        const selectedTools = tools ? tools.map((id: string) => ({ toolId: id })) : [];
+        interface ToolItem {
+            toolName?: string;
+            toolId?: string;
+            parameterOverrides?: Record<string, any>;
+            [key: string]: any; 
+        }
+        
+        let processedTools: ToolItem[] = [];
+        if (tools && Array.isArray(tools)) {
+            processedTools = tools.map((tool: any) => {
+                if (typeof tool === 'object' && tool !== null && tool.toolName) {
+                    return tool as ToolItem;
+                }
+                if (typeof tool === 'string') {
+                    return { toolId: tool } as ToolItem;
+                }
+                return null;
+            }).filter(Boolean) as ToolItem[]; 
+        }
 
         const callConfig: CallConfig = {
             systemPrompt: system_prompt,
@@ -202,9 +220,8 @@ export class TwilioService {
                 twilio: {}
             },
             selectedTools: [
-                { toolName: "hangUp" },
                 { toolName: "transferCall" },
-                ...selectedTools
+                ...processedTools
             ]
         };
 
