@@ -105,6 +105,7 @@ export class TwilioService {
     }
 
     async makeCall(params: {
+        callConfig: CallConfig;
         botId: string;
         toNumber: string;
         twilioFromNumber: string;
@@ -116,7 +117,7 @@ export class TwilioService {
         transferTo?: string;
         isSingleTwilioAccount?: boolean;
     }) {
-        const { botId, toNumber, twilioFromNumber, userId, placeholders, tools, supabase, env, transferTo, isSingleTwilioAccount } = params;
+        const { botId, toNumber, twilioFromNumber, userId, placeholders, tools, supabase, env, transferTo, isSingleTwilioAccount, callConfig : call_config } = params;
 
         let account_sid = "";
         let auth_token = "";
@@ -125,16 +126,17 @@ export class TwilioService {
         }
 
         // Get bot details
-        const { data: bot, error: botError } = await supabase
-            .from('bots')
-            .select('voice, system_prompt')
-            .eq('id', botId)
-            .eq('user_id', userId)
-            .single();
+            const { data: bot, error: botError } = await supabase
+                .from('bots')
+                .select('voice, system_prompt')
+                .eq('id', botId)
+                .eq('user_id', userId)
+                .single();
 
-        if (botError) {
-            throw new Error("Bot not found");
-        }
+            if (botError) {
+                throw new Error("Bot not found");
+            }
+        
 
         // Get Twilio number details
         const { data: twilioNumber, error: twilioNumberError } = await supabase
@@ -181,7 +183,12 @@ export class TwilioService {
             auth_token = singleTwilioAccount.auth_token;
         }
 
-        let { voice, system_prompt } = bot;
+        let { voice, systemPrompt: system_prompt } = call_config || {};
+
+        if(!voice || !system_prompt){
+            voice = bot.voice;
+            system_prompt = bot.system_prompt;
+        }
 
         // Replace placeholders in system prompt
         if(placeholders) {
@@ -366,21 +373,26 @@ export class TwilioService {
         const { event, call: callConfig, supabaseClient } = mixedCallConfig;
         const { callId, medium } = callConfig;
 
-        if(callConfig.endReason === 'unjoined') {
-            console.log("Call ended with reason 'unjoined'");
-            await this.deleteCallData(callId);
-            return;
-        }
-
         try {
             const TimeTaken = new Date(callConfig.ended).getTime() - new Date(callConfig.joined).getTime();
             console.log("TimeTaken: ", TimeTaken);
+
+
+            if(callConfig.endReason === 'unjoined') {
+                console.log("Call ended with reason 'unjoined'");
+                await this.deleteCallData(callId);
+                return;
+            }
 
             // Get call data from KV
             const call = await this.getCallData(callId);
             if (!call) {
                 console.error("Call not found:", callId);
-                return;
+                return{
+                    userId: null,
+                    TimeTaken: TimeTaken,
+                    callId: null
+                };
             }
 
             const { twilioData: { user_id: userId, from_phone_number: account_name } } = call;

@@ -25,7 +25,7 @@ export type CallDetails = {
   temperature?: string;
   time_exceeded_message?: string;
   system_prompt?: string;
-
+  metadata?: Record<string, string>;
 };
 
 
@@ -33,6 +33,7 @@ export async function makeCall(c: Context) {
   try {
     const body = await c.req.json();
     const {
+      callConfig: callConfig,
       bot_id: botId,
       to_number: toNumber,
       from_number: twilioFromNumber,
@@ -50,6 +51,7 @@ export async function makeCall(c: Context) {
     console.log("Transfering call to: ", transferTo);
     
     const result = await twilioService.makeCall({
+      callConfig,
       botId,
       toNumber,
       twilioFromNumber,
@@ -153,7 +155,8 @@ export async function finishCall(c: Context) {
         time_exceeded_message: call.timeExceededMessage,
         short_summary: call.shortSummary,
         long_summary: call.summary,
-        system_prompt: call.systemPrompt
+        system_prompt: call.systemPrompt,
+        metadata: call.metadata
       };
 
       //importing the call Details to our db
@@ -182,11 +185,16 @@ export async function finishCall(c: Context) {
           }, 500);
         }
 
-        const {userId , TimeTaken , callId} = response;
+        let {userId , TimeTaken , callId} = response;
 
         console.log("Call ID to delete: ", callId , userId , TimeTaken);
 
-        if(!userId || !TimeTaken) {
+        if(!userId || !callId) {
+          userId = call?.metadata?.['user_id'];
+          callId = call?.callId;
+        }
+
+        if(!userId || !TimeTaken || !callId) {
          console.error("Background finishCall error: Missing userId or TimeTaken");
           return c.json({
             status: 'error',

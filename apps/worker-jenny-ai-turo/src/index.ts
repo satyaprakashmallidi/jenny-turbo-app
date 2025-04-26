@@ -8,6 +8,7 @@ import corpusRoutes from './routes/corpus.routes'
 import singleTwilioRoutes from './routes/single-twilio-account.routes'
 import callTranscriptsRoutes from './routes/call-transcripts.routes'
 import { CallDetails } from './controller/twilio.controller';
+import Voice from 'twilio/lib/rest/Voice';
 
 //Caching Voices
 let cachedVoices: any = null;
@@ -142,6 +143,61 @@ app.get('/api/get-call-details' , async (c) => {
 
   } catch (error) {
     console.error("Get Call Details Error:", error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error,
+    }, 500);
+  }
+})
+
+app.get('/api/mind-dost', async (c) => {
+  try {
+    if (!c.req.env.ULTRAVOX_API_KEY) {
+      return c.json({
+        status: 'error',
+        message: 'Ultravox API key missing',
+      }, 500);
+    }
+
+    const response = await fetch('https://api.ultravox.ai/api/calls', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': c.req.env.ULTRAVOX_API_KEY,
+      },
+      body: JSON.stringify({
+        voice: "d17917ec-fd98-4c50-8c83-052c575cbf3e",
+        temperature: 0.6,
+        joinTimeout: "30s",
+        maxDuration: "180s",
+        recordingEnabled: true,
+        timeExceededMessage: "I'm sorry, I can't help you with that.",
+        systemPrompt: "You are Mind Dost — pronounce it clearly as 'Mind Dhost' so it sounds like the Hindi word दोस्त. Always refer to yourself as 'Mind Dost' in writing, but speak it as 'Mind Dhost' (for English) or 'माइंड दोस्त' (for Hindi). You are a friendly, intelligent voice assistant who communicates like a human. Be conversational, helpful, emotionally aware, and engaging. Respond in a warm, spoken tone — short and natural, like you're talking to a close friend. At the beginning of the session, always ask the user: 'Would you like to talk in English or Hindi today?' — and remember their choice for the rest of the conversation.",
+        metadata: {
+          "user_id": "c99f0ac3-a143-4be9-ad80-3f59cd04d712"
+        },
+        selectedTools: [{"toolName":"hangUp"}]
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("MindDost API error:", errorText);
+      return c.json({
+        status: 'error',
+        message: 'MindDost API error',
+        error: errorText,
+      }, 500);
+    }
+
+    const data = await response.json();
+    return c.json({
+      status: 'success',
+      join_url: data?.joinUrl
+    });
+  } catch (error) {
+    console.error("Creating Ultravox-mindDost Call Error:", error);
     return c.json({
       status: 'error',
       message: 'Internal Server Error',
