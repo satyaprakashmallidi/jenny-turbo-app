@@ -208,6 +208,9 @@ export class TwilioService {
         let processedTools: ToolItem[] = [];
         if (tools && Array.isArray(tools)) {
             processedTools = tools.map((tool: any) => {
+                if(typeof tool === 'object' && tool !== null){
+                    return tool as ToolItem;
+                }
                 if (typeof tool === 'object' && tool !== null && tool.toolName) {
                     return tool as ToolItem;
                 }
