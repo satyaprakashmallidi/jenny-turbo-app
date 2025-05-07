@@ -60,7 +60,7 @@ export class CorpusService {
     chunkSize: 512, // Optimal for most content types while maintaining context
     chunkOverlap: 50, // ~10% overlap to maintain context between chunks
     maxVectors: 10000, // Reasonable limit for most use cases
-    maxDocs: 1000, // Reasonable limit for document management
+    maxDocs: 200, // Reasonable limit for document management
     maxDocumentBytes: 10485760, // 10MB limit per document
     embeddingDimension: 1536, // Standard for OpenAI embeddings
     similarityMetric: 'cosine', // Most effective for semantic search

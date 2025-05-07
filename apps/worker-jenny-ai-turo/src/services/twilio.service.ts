@@ -2,6 +2,7 @@ import { CallConfig, CallConfigWebhookResponse, JoinUrlResponse, twilioData } fr
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { Env } from "../config/env";
 import twilio from 'twilio';
+import VoiceResponse from "twilio/lib/twiml/VoiceResponse";
 
 type CallRecord = {
     config: CallConfig;
@@ -67,6 +68,7 @@ export class TwilioService {
         if (!this.env) throw new Error('Environment not initialized');
         
         try {
+            await this.env.ACTIVE_CALLS.put(callData.twilioResponseData.sid, callId);
             await this.env.ACTIVE_CALLS.put(callId, JSON.stringify(callData));
             console.log("Stored call data for:", callId);
         } catch (error) {
@@ -92,12 +94,32 @@ export class TwilioService {
         }
     }
 
-    // Delete call data from KV
-    private async deleteCallData(callId: string) {
+    private async getCallDataByTwilioCallSid(callSid: string) : Promise<CallRecord | null> {
         if (!this.env) throw new Error('Environment not initialized');
         
         try {
+            const call_id = await this.env.ACTIVE_CALLS.get(callSid);
+            if (!call_id) {
+                console.log("No call data found for:", callSid);
+                return null;
+            }
+            const callData = await this.getCallData(call_id);
+            return callData;
+        } catch (error) {
+            console.error("Error fetching call data:", error);
+            return null;
+        }
+    }
+
+    // Delete call data from KV
+    private async deleteCallData(callId: string) {
+        if (!this.env) throw new Error('Environment not initialized');
+
+        const callData = await this.getCallData(callId);
+        
+        try {
             await this.env.ACTIVE_CALLS.delete(callId);
+            await this.env.ACTIVE_CALLS.delete(callData?.twilioResponseData.sid || '');
             console.log("Deleted call data for:", callId);
         } catch (error) {
             console.error("Error deleting call data:", error);
@@ -293,6 +315,9 @@ export class TwilioService {
                 To: toNumber,
                 From: twilioFromNumber,
                 Twiml: `<Response><Connect><Stream url="${joinUrl}" /></Connect></Response>`,
+                MachineDetection: 'DetectMessageEnd',
+                AsyncAmd: 'true',
+                AsyncAmdStatusCallback: 'https://fc3b-183-83-227-251.ngrok-free.app/api/async-amd-status',
             })
         });
 
@@ -353,12 +378,16 @@ export class TwilioService {
         const { config: callConfig, twilioData, joinUrlResponse, twilioResponseData } = call;
 
         const client = twilio(twilioData.account_sid, twilioData.auth_token);
-        const twiml = new twilio.twiml.VoiceResponse();
+        const twiml = new VoiceResponse();
         twiml.dial().number(transferTo as string);
 
         const UpdatedCall = await client.calls(twilioResponseData.sid).update({
             twiml: twiml.toString()
         });
+
+        console.log("UpdatedCall: ", UpdatedCall);
+
+        this.deleteCallData(callId);
 
         return {
             callId,
@@ -366,6 +395,50 @@ export class TwilioService {
             urgencyLevel,
             status: 'transferring'
         };
+    }
+
+    async voiceMailDetector(callSid: string, twilioSid: string) {
+        const call = await this.getCallDataByTwilioCallSid(callSid);
+        if (!call) {
+            console.error("Call not found:", callSid , twilioSid);
+            throw new Error('Call not found');
+        }
+
+        try{
+
+        const { config: callConfig, twilioData, joinUrlResponse, twilioResponseData } = call;
+
+        if(twilioSid !== twilioData.account_sid) {
+            console.error("Invalid account , account sids are not matching", callSid);
+            throw new Error('Invalid account , account sids are not matching');
+        }
+
+        console.log("UpdatedCall: --> updating the text npo erors till now");
+
+        const client = twilio(twilioData.account_sid, twilioData.auth_token);
+        const twiml = new VoiceResponse();
+        twiml.pause({ length: 1 });
+        twiml.say("we have detected a voicemail, you call callback on the same number for further assistance");
+        twiml.hangup();
+
+        console.log("UpdatedCall: --> hehe");
+
+        const UpdatedCall = await client.calls(twilioResponseData.sid).update({
+            twiml: twiml.toString()
+        });
+
+        return {
+            callSid,
+            status: 'transferring'
+        };
+
+        this.deleteCallData(callSid);
+
+        }catch(error){
+            console.error("Error transferring call:", error);
+            throw new Error('Failed to transfer call');
+        }
+
     }
 
     async finishCall(mixedCallConfig: { 

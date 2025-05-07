@@ -9,6 +9,7 @@ import singleTwilioRoutes from './routes/single-twilio-account.routes'
 import callTranscriptsRoutes from './routes/call-transcripts.routes'
 import { CallDetails } from './controller/twilio.controller';
 import Voice from 'twilio/lib/rest/Voice';
+import { TwilioService } from './services/twilio.service';
 
 //Caching Voices
 let cachedVoices: any = null;
@@ -16,6 +17,196 @@ let lastCacheTime = 0;
 const cacheDuration = 60 * 60 * 1000;
 
 const app = createApp();
+
+app.post('/api/set-twilio-webhook', async (c) => {
+  const body = await c.req.json();
+  const { voice_url , account_sid , auth_token , phone_number_sid: phone_number } = body;
+
+  console.log("Set Twilio Webhook Body", body);
+
+  if (!account_sid || !voice_url || !auth_token || !phone_number) {
+    return c.json({
+      status: 'error',
+      message: 'Missing parameters',
+    }, 400);
+  }
+
+  //get the phone number sid
+  const sid_response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${account_sid}/IncomingPhoneNumbers.json?PhoneNumber=${phone_number}`
+, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Basic ${Buffer.from(`${account_sid}:${auth_token}`).toString('base64')}`,
+    },
+  });
+
+  const sid_data = await sid_response.json();
+
+  const phone_number_sid = sid_data?.incoming_phone_numbers?.[0]?.sid;
+
+  console.log("Phone Number SID", phone_number_sid);
+
+  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${account_sid}/IncomingPhoneNumbers/${phone_number_sid}.json`
+, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Authorization': `Basic ${Buffer.from(`${account_sid}:${auth_token}`).toString('base64')}`,
+    },
+    body: new URLSearchParams({
+      VoiceUrl: voice_url,
+    }).toString(),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Twilio API error:", errorText);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: errorText,
+    }, 500);
+  }
+
+  return c.json({
+    status: 'success',
+    data: await response.json()
+  });
+})
+
+app.get('/api/inbound', async (c) => {
+  const userId = c.req.query('user_id');
+  const botId = c.req.query('bot_id');
+
+  const errorResponse = ` <Response>
+      <Say voice="alice">Sorry we are currently under maintenance , please call again later</Say>
+    </Response>`
+
+  const unauthorizedResponse = ` <Response>
+      <Say voice="alice">Kindly Contact Support , The Service is currently Blocked</Say>
+    </Response>`
+  
+  if (!userId || !botId) {
+    return c.text(unauthorizedResponse, 200 , {
+      'Content-Type': 'text/xml'
+    });
+  }
+
+  console.log("Inbound API Request", userId, botId);
+
+  const { data, error } = await c.req.db
+    .from('bots')
+    .select('*')
+    .eq('id', botId);
+
+  if (error) {
+    return c.text(errorResponse, 200 , {
+      'Content-Type': 'text/xml'
+    });
+  }
+
+  if (!data || data.length === 0) {
+    return c.text(errorResponse, 200 , {
+      'Content-Type': 'text/xml'
+    });
+  }
+
+  if(data[0].user_id !== userId) {
+    return c.text(unauthorizedResponse, 200 , {
+      'Content-Type': 'text/xml'
+    });
+  }
+
+
+
+  const bot = data[0];
+
+  console.log("Bot Data", bot);
+  const { voice , system_prompt , name , temperature , is_appointment_booking_allowed , appointment_tool_id , knowledge_base_id } = bot;
+
+  let tools = [{
+    toolName: "hangUp"
+  }];
+
+  if(knowledge_base_id){
+    tools.push({
+      toolName: "queryCorpus",
+      parameterOverrides: {
+        corpus_id: knowledge_base_id,
+        max_results: 5
+      }
+    });
+  }
+
+  const callConfig: CallConfigWebhookResponse = {
+    voice,
+    temperature: temperature>0 ?`0.${temperature}` : '0',
+    joinTimeout: "30s",
+    maxDuration: "300s",
+    recordingEnabled: true,
+    timeExceededMessage: "I'm sorry, I can't help you with that.",
+    systemPrompt: system_prompt,
+    medium: {
+      twilio: {}
+    },
+    metadata: {
+      bot_id: botId,
+      user_id: userId
+    },
+    selectedTools: tools
+  };
+
+  const response = await fetch('https://api.ultravox.ai/api/calls', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': c.req.env.ULTRAVOX_API_KEY,
+    },
+    body: JSON.stringify(callConfig),
+  });
+
+  if (!response.ok) {
+
+    console.error("Ultravox API error:", await response.text());
+    return c.text(errorResponse, 200 , {
+      'Content-Type': 'text/xml'
+    });
+  }
+
+  const ultravoxResp = await response.json() as CallConfigWebhookResponse;
+
+  console.log("Ultravox Response", ultravoxResp);
+
+  const finalResp = `<Response>
+      <Connect>
+        <Stream url="${ultravoxResp.joinUrl}"/>
+      </Connect>
+    </Response>`;
+
+  return c.text(finalResp, 200 , {
+    'Content-Type': 'text/xml'
+  });
+  
+})
+
+app.post('/api/async-amd-status', async (c) => {
+    const body = await c.req.parseBody();
+    const AccountSid = body.AccountSid;
+    const answeredBy = body.AnsweredBy;
+    const CallSid = body.CallSid;
+
+    console.log("Async AMD Status" , AccountSid , answeredBy , CallSid );
+
+    if(answeredBy === 'machine_start' || answeredBy === 'machine_end_beep' || answeredBy === 'machine_end_silence' || answeredBy === 'machine_end_other'){
+      await TwilioService.getInstance().voiceMailDetector(CallSid as string, AccountSid as string);
+    }
+    
+    return c.json({
+      status: 'success',
+      message: 'Async AMD Status received',
+    });
+})
 
 app.post('/api/test', async (c) => {
 
