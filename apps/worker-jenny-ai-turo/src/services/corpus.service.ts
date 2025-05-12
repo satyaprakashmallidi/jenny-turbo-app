@@ -530,8 +530,8 @@ export class CorpusService {
       const updateData: UpdatePayload = {
         loadSpec: {
           startUrls: request.urls || sourceDetails.loadSpec.startUrls, // Keep existing URLs if none provided
-          maxDocuments: request.maxDocuments || sourceDetails.loadSpec.maxDocuments,
-          maxDocumentBytes: request.maxDocumentBytes || sourceDetails.loadSpec.maxDocumentBytes,
+          maxDocuments: 200,
+          maxDocumentBytes: 10485760,
           maxDepth: request.maxDepth || sourceDetails.loadSpec.maxDepth,
           relevantDocumentTypes: this.supportedDocTypes
         }

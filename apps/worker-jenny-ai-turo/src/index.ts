@@ -2,7 +2,7 @@ import { createApp } from './config/hono'
 import twilioRoutes from './routes/twilio.routes'
 import agentRoutes from './routes/agents.routes'
 import toolRoutes from './routes/tools.routes'
-import { CallConfigWebhookResponse } from '@repo/common-types/types';
+import { CallConfig, CallConfigWebhookResponse } from '@repo/common-types/types';
 import { finishCall } from './controller/twilio.controller';
 import corpusRoutes from './routes/corpus.routes'
 import singleTwilioRoutes from './routes/single-twilio-account.routes'
@@ -78,6 +78,8 @@ app.post('/api/set-twilio-webhook', async (c) => {
 app.get('/api/inbound', async (c) => {
   const userId = c.req.query('user_id');
   const botId = c.req.query('bot_id');
+  const callSid = c.req.query('CallSid');
+  const accountSid = c.req.query('AccountSid');
 
   const errorResponse = ` <Response>
       <Say voice="alice">Sorry we are currently under maintenance , please call again later</Say>
@@ -123,7 +125,7 @@ app.get('/api/inbound', async (c) => {
   const bot = data[0];
 
   console.log("Bot Data", bot);
-  const { voice , system_prompt , name , temperature , is_appointment_booking_allowed , appointment_tool_id , knowledge_base_id } = bot;
+  const { voice , system_prompt , name , temperature , is_appointment_booking_allowed ,twilio_phone_number , appointment_tool_id , knowledge_base_id , is_call_transfer_allowed , call_transfer_number } = bot;
 
   let tools = [{
     toolName: "hangUp"
@@ -132,6 +134,7 @@ app.get('/api/inbound', async (c) => {
   if(knowledge_base_id){
     tools.push({
       toolName: "queryCorpus",
+      //@ts-ignore
       parameterOverrides: {
         corpus_id: knowledge_base_id,
         max_results: 5
@@ -139,9 +142,9 @@ app.get('/api/inbound', async (c) => {
     });
   }
 
-  const callConfig: CallConfigWebhookResponse = {
+  const callConfig: CallConfig = {
     voice,
-    temperature: temperature>0 ?`0.${temperature}` : '0',
+    temperature: temperature>0 ? Number(`0.${temperature}`) : 0,
     joinTimeout: "30s",
     maxDuration: "300s",
     recordingEnabled: true,
@@ -150,6 +153,7 @@ app.get('/api/inbound', async (c) => {
     medium: {
       twilio: {}
     },
+    //@ts-ignore
     metadata: {
       bot_id: botId,
       user_id: userId
@@ -157,30 +161,47 @@ app.get('/api/inbound', async (c) => {
     selectedTools: tools
   };
 
-  const response = await fetch('https://api.ultravox.ai/api/calls', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key': c.req.env.ULTRAVOX_API_KEY,
-    },
-    body: JSON.stringify(callConfig),
-  });
+  const twilioService = TwilioService.getInstance();
 
-  if (!response.ok) {
+  twilioService.setDependencies(c.req.db, c.req.env);
 
-    console.error("Ultravox API error:", await response.text());
-    return c.text(errorResponse, 200 , {
-      'Content-Type': 'text/xml'
-    });
-  }
+  const result = await twilioService.makeInboundCall({
+    callConfig,
+    botId,
+    userId,
+    tools,
+    supabase: c.req.db,
+    env: c.req.env,
+    temperature: temperature>0 ? Number(`0.${temperature}`) : 0,
+    callSid,
+    twilioFromNumber: twilio_phone_number,
+    transferTo: is_call_transfer_allowed ? call_transfer_number : undefined,
+  })
 
-  const ultravoxResp = await response.json() as CallConfigWebhookResponse;
+  // const response = await fetch('https://api.ultravox.ai/api/calls', {
+  //   method: 'POST',
+  //   headers: {
+  //     'Content-Type': 'application/json',
+  //     'X-API-Key': c.req.env.ULTRAVOX_API_KEY,
+  //   },
+  //   body: JSON.stringify(callConfig),
+  // });
 
-  console.log("Ultravox Response", ultravoxResp);
+  // if (!response.ok) {
+
+  //   console.error("Ultravox API error:", await response.text());
+  //   return c.text(errorResponse, 200 , {
+  //     'Content-Type': 'text/xml'
+  //   });
+  // }
+
+  // const ultravoxResp = await response.json() as CallConfigWebhookResponse;
+
+  // console.log("Ultravox Response", ultravoxResp);
 
   const finalResp = `<Response>
       <Connect>
-        <Stream url="${ultravoxResp.joinUrl}"/>
+        <Stream url="${result.joinUrl}"/>
       </Connect>
     </Response>`;
 

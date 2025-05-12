@@ -2,7 +2,7 @@ import { CallConfig, CallConfigWebhookResponse, JoinUrlResponse, twilioData } fr
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { Env } from "../config/env";
 import twilio from 'twilio';
-import VoiceResponse from "twilio/lib/twiml/VoiceResponse";
+import VoiceResponse, { name } from "twilio/lib/twiml/VoiceResponse";
 
 type CallRecord = {
     config: CallConfig;
@@ -123,6 +123,203 @@ export class TwilioService {
             console.log("Deleted call data for:", callId);
         } catch (error) {
             console.error("Error deleting call data:", error);
+        }
+    }
+
+    async makeInboundCall(params: {
+        callConfig: CallConfig;
+        botId: string;
+        userId: string;
+        tools: any[];
+        supabase: SupabaseClient;
+        env: Env;
+        twilioFromNumber: string;
+        temperature: number;
+        callSid: string;
+        transferTo?: string;
+        isSingleTwilioAccount?: boolean;
+    }) : Promise<{joinUrl: string}> {
+
+        const { botId,  twilioFromNumber, userId, tools, supabase, env, temperature, transferTo, isSingleTwilioAccount, callConfig : call_config , callSid } = params;
+
+        let account_sid = "";
+        let auth_token = "";
+        if(!botId || !twilioFromNumber || !userId){
+            throw new Error("Missing parameters");
+        }
+
+        // Get bot details
+        const { data: bot, error: botError } = await supabase
+            .from('bots')
+            .select('voice, system_prompt')
+            .eq('id', botId)
+            .eq('user_id', userId)
+            .single();
+
+        if (botError) {
+            throw new Error("Bot not found");
+        }
+
+        // Get Twilio number details
+        const { data: twilioNumber, error: twilioNumberError } = await supabase
+            .from('twilio_phone_numbers')
+            .select('id , account_id')
+            .eq('phone_number', twilioFromNumber);
+        
+            console.log(twilioNumber , "i am getting data from twilio_number table haha");
+
+        if (twilioNumberError) {
+            throw new Error("Twilio Number not found");
+        }
+
+        // Get Twilio account details
+        const { data: twilioAccount, error: twilioAccountError } = await supabase
+            .from('twilio_account')
+            .select('account_sid, auth_token , user_id')
+            .eq('id', twilioNumber[0].account_id)
+            .single();
+
+        if (twilioAccountError) {
+            throw new Error("Twilio Account not found for This User");
+        }
+
+        if(twilioAccount.user_id !== userId) {
+            throw new Error("Unauthorized to use this Twilio Account");
+        }
+
+        account_sid = twilioAccount.account_sid;
+        auth_token = twilioAccount.auth_token;
+
+        if(isSingleTwilioAccount){
+            const { data: singleTwilioAccount, error: singleTwilioAccountError } = await supabase
+            .from('twilio_credentials')
+            .select('account_sid, auth_token')
+            .eq('user_id', userId)
+            .single();
+
+            if(singleTwilioAccountError){
+                throw new Error("Twilio Account not found");
+            }
+
+            account_sid = singleTwilioAccount.account_sid;
+            auth_token = singleTwilioAccount.auth_token;
+        }
+
+        let { voice, systemPrompt: system_prompt } = call_config || {};
+
+        if(!voice || !system_prompt){
+            voice = bot.voice;
+            system_prompt = bot.system_prompt;
+        }
+
+        if(transferTo){
+            tools.push({
+                toolName: "transferCall",
+            });
+        }
+
+        const callConfig : CallConfig = {
+            voice,
+            systemPrompt: system_prompt,
+            temperature,
+            selectedTools: tools,
+            recordingEnabled: true,
+            joinTimeout: "30s",
+            medium: {
+                twilio: {
+                }
+            },
+            //@ts-ignore
+            metadata: {
+                bot_id: botId,
+                user_id: userId
+            }
+        }
+
+        const ultravoxResponse = await fetch('https://api.ultravox.ai/api/calls', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': env.ULTRAVOX_API_KEY,
+            },
+            body: JSON.stringify(callConfig),
+        });
+
+        if (!ultravoxResponse.ok) {
+            throw new Error("Ultravox API error" , {
+                cause: await ultravoxResponse.text()
+            });
+        }
+
+        const ultravoxData: JoinUrlResponse = await ultravoxResponse.json();
+        const { joinUrl , callId: ultravoxCallId } = ultravoxData;
+
+        let additional_data_to_store_in_call_records: {
+            placeholders?: Record<string, string>;
+            transferTo?: string;
+            isSingleTwilioAccount?: boolean;
+        } = {};
+
+        // if(placeholders) {
+        //     additional_data_to_store_in_call_records.placeholders = placeholders;
+        // }
+
+        if(transferTo) {
+            additional_data_to_store_in_call_records.transferTo = transferTo;
+        }
+
+        if(isSingleTwilioAccount) {
+            additional_data_to_store_in_call_records.isSingleTwilioAccount = isSingleTwilioAccount;
+        }
+
+        const { data: pushedCallToCallRecords , error: errorPushedCallToCallRecords } = await supabase
+            .from('call_records')
+            .insert([
+                {
+                    call_id: ultravoxCallId,
+                    bot_id: botId,
+                    user_id: userId,
+                    additional_data: additional_data_to_store_in_call_records,
+                }
+            ])
+            .select()
+
+        if(errorPushedCallToCallRecords){
+            throw new Error("Failed to push call to call records" , {
+                cause: errorPushedCallToCallRecords
+            });
+        }
+
+        //create kv
+        await this.storeCallData(ultravoxCallId , {
+            config: callConfig,
+            twilioResponseData: {
+                sid: callSid,
+                ultravox_call_id: ultravoxCallId,
+                bot_id: botId,
+                user_id: userId,
+                from_number: twilioFromNumber,
+                to_number: "inbound",
+                created_at: new Date().toISOString(),
+                status: "initiated",
+                account_sid: account_sid,
+                phone_number_sid: twilioNumber[0].id,
+                to: "inbound",
+                to_formatted: "inbound"
+            },
+            joinUrlResponse: ultravoxData,
+            twilioData: {
+                auth_token,
+                account_sid,
+                from_phone_number: twilioFromNumber,
+                to_number: "inbound",
+                user_id: userId,
+            },
+            transferTo: transferTo
+        });
+
+        return {
+            joinUrl: ultravoxData.joinUrl
         }
     }
 
