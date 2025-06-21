@@ -156,16 +156,24 @@ export async function finishCall(c: Context) {
         short_summary: call.shortSummary,
         long_summary: call.summary,
         system_prompt: call.systemPrompt,
-        metadata: call.metadata
       };
 
       //importing the call Details to our db
       console.log("Importing call details to db", callDetails);
-      await c.req.db
+      const { data , error } = await c.req.db
         .from('call_details')
         .upsert([callDetails] , {
           onConflict: 'call_id'
         });
+
+      if(error){
+          console.error("Error importing call details to db", error);
+          return c.json({
+            status: 'error',
+            message: 'Failed to import call details to db',
+            error: error instanceof Error ? error.message : 'Unknown error',
+          }, 500);
+        }
     }
     
     const twilioService = TwilioService.getInstance();

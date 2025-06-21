@@ -13,7 +13,7 @@ export class CallTranscriptsService {
     this.env = env;
     this.db = db;
     this.apiKey = env.ULTRAVOX_API_KEY;
-    this.baseUrl = env.ULTRAVOX_API_URL || 'https://api.ultravox.ai/api';
+    this.baseUrl = 'https://api.ultravox.ai/api';
   }
 
   public static getInstance(env: Env, db: SupabaseClient): CallTranscriptsService {

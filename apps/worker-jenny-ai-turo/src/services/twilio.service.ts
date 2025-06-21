@@ -145,6 +145,7 @@ export class TwilioService {
         let account_sid = "";
         let auth_token = "";
         if(!botId || !twilioFromNumber || !userId){
+            console.error("Missing parameters", botId, twilioFromNumber, userId);
             throw new Error("Missing parameters");
         }
 
@@ -157,6 +158,7 @@ export class TwilioService {
             .single();
 
         if (botError) {
+            console.error("Bot not found", botError);
             throw new Error("Bot not found");
         }
 
@@ -169,6 +171,7 @@ export class TwilioService {
             console.log(twilioNumber , "i am getting data from twilio_number table haha");
 
         if (twilioNumberError) {
+            console.error("Twilio Number not found", twilioNumberError);
             throw new Error("Twilio Number not found");
         }
 
@@ -180,10 +183,12 @@ export class TwilioService {
             .single();
 
         if (twilioAccountError) {
+            console.error("Twilio Account not found for This User", twilioAccountError);
             throw new Error("Twilio Account not found for This User");
         }
 
         if(twilioAccount.user_id !== userId) {
+            console.error("Unauthorized to use this Twilio Account");
             throw new Error("Unauthorized to use this Twilio Account");
         }
 
@@ -198,6 +203,7 @@ export class TwilioService {
             .single();
 
             if(singleTwilioAccountError){
+                console.error("Twilio Account not found", singleTwilioAccountError);
                 throw new Error("Twilio Account not found");
             }
 
@@ -208,6 +214,7 @@ export class TwilioService {
         let { voice, systemPrompt: system_prompt } = call_config || {};
 
         if(!voice || !system_prompt){
+            console.log("Bot not found not a problem");
             voice = bot.voice;
             system_prompt = bot.system_prompt;
         }
@@ -246,6 +253,7 @@ export class TwilioService {
         });
 
         if (!ultravoxResponse.ok) {
+            console.error("Ultravox API error", ultravoxResponse);
             throw new Error("Ultravox API error" , {
                 cause: await ultravoxResponse.text()
             });
@@ -440,7 +448,7 @@ export class TwilioService {
             }).filter(Boolean) as ToolItem[]; 
         }
 
-        const callConfig: CallConfig = {
+        let callConfig: CallConfig = {
             systemPrompt: system_prompt,
             voice: voice,
             recordingEnabled: true,
@@ -451,8 +459,26 @@ export class TwilioService {
             selectedTools: [
                 { toolName: "transferCall" },
                 ...processedTools
-            ]
+            ],
+            //@ts-ignore
+            firstSpeaker: "FIRST_SPEAKER_AGENT",
+            metadata: {
+                botId,
+                userId,
+            }
         };
+
+        if(!callConfig.selectedTools?.some((tool: any) => tool.toolName === "hangUp")) {
+            callConfig.selectedTools?.push({
+                toolName: "hangUp"
+            });
+        }
+
+        if(!callConfig.selectedTools?.some((tool: any) => tool.toolName === "leaveVoicemail")) {
+            callConfig.selectedTools?.push({
+                toolName: "leaveVoicemail"
+            });
+        }
 
         // Create Ultravox call
         const ultravoxResponse = await fetch('https://api.ultravox.ai/api/calls', {
@@ -550,7 +576,8 @@ export class TwilioService {
             from_number: twilioFromNumber,
             to_number: toNumber,
             bot_id: botId,
-            status: twilioData.status
+            status: twilioData.status,
+            callId: ultravoxCallId
         };
     }
 

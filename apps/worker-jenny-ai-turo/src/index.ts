@@ -10,6 +10,7 @@ import callTranscriptsRoutes from './routes/call-transcripts.routes'
 import { CallDetails } from './controller/twilio.controller';
 import Voice from 'twilio/lib/rest/Voice';
 import { TwilioService } from './services/twilio.service';
+import { CallTranscriptsService } from './services/call-transcripts.service';
 
 //Caching Voices
 let cachedVoices: any = null;
@@ -56,6 +57,7 @@ app.post('/api/set-twilio-webhook', async (c) => {
     },
     body: new URLSearchParams({
       VoiceUrl: voice_url,
+      VoiceMethod: 'GET',
     }).toString(),
   });
 
@@ -129,6 +131,8 @@ app.get('/api/inbound', async (c) => {
 
   let tools = [{
     toolName: "hangUp"
+  }, {
+    toolName: "leaveVoicemail",
   }];
 
   if(knowledge_base_id){
@@ -199,6 +203,8 @@ app.get('/api/inbound', async (c) => {
 
   // console.log("Ultravox Response", ultravoxResp);
 
+  console.log("Inbound API Response", result);
+
   const finalResp = `<Response>
       <Connect>
         <Stream url="${result.joinUrl}"/>
@@ -252,6 +258,148 @@ app.post('/api/test', async (c) => {
               data,
               error
             });
+});
+
+
+export interface CallMessage {
+  role: string;
+  text: string;
+  medium: string;
+  callStageId: string;
+  callStageMessageIndex: number;
+}
+
+export interface CallTranscriptResponse {
+  status: string;
+  data: {
+    next: string | null;
+    previous: string | null;
+    total: number;
+    results: CallMessage[];
+  };
+}
+
+interface CallTranscriptMap {
+  [callId: string]: {
+      messages: CallMessage[];
+      lastFetched: number;
+      hasMore: boolean;
+      nextCursor: string | null;
+  };
+}
+
+app.get('/api/transcript', async (c) => {
+  const callId = c.req.query('call_id');
+  const cursor = (c.req.query('cursor') || '0');
+  const limit = (c.req.query('limit') || '10');
+
+  if (!callId) {
+    return c.json({
+      status: 'error',
+      message: 'Missing callId',
+    }, 400);
+  }
+
+  const transcriptMap: CallTranscriptMap = {};
+
+  try{
+    
+    console.log(`Fetching transcript for call: ${callId} ${cursor ? `with cursor: ${cursor}` : ''}`);
+
+    // First, try to get transcripts from the database
+    let query = c.req.db
+        .from('call_transcripts')
+        .select('*')
+        .eq('call_id', callId)
+        .order('chunk_index', { ascending: true });
+
+    // Apply pagination if cursor is provided
+    if (cursor) {
+        const parsedCursor = parseInt(cursor, 10);
+        if (!isNaN(parsedCursor)) {
+            query = query.gt('chunk_index', parsedCursor).limit(20);
+        }
+    } else {
+        query = query.limit(20);
+    }
+
+    const { data, error } = await query;
+
+    // If we have data from the database, process and return it
+    if (data && data.length > 0 && !error) {
+        // Process and format the transcript chunks into CallMessages
+        const messages: CallMessage[] = [];
+        
+        // Since transcript_chunk is stored as a JSON string containing an array of messages
+        data.forEach(chunk => {
+            try {
+                const chunkMessages = JSON.parse(chunk.transcript_chunk);
+                if (Array.isArray(chunkMessages)) {
+                    messages.push(...chunkMessages);
+                }
+            } catch (e) {
+                console.error('Error parsing transcript chunk:', e);
+            }
+        });
+
+        // Determine if there's more data to fetch
+        const lastIndex = data[data.length - 1].chunk_index;
+        const nextCursor = lastIndex !== undefined ? String(lastIndex) : null;
+
+        // Check if there are more records
+        const { count } = await c.req.db
+            .from('call_transcripts')
+            .select('*', { count: 'exact', head: true })
+            .eq('call_id', callId)
+            .gt('chunk_index', lastIndex);
+
+        const hasMore = !!count && count > 0;
+
+        // Update store based on whether this is initial load or pagination
+        transcriptMap[callId] = {
+            messages,
+            lastFetched: lastIndex,
+            hasMore,
+            nextCursor: hasMore ? nextCursor : null
+            };
+  
+
+        console.log(`Retrieved transcript from database for call: ${callId}`);
+        return c.json({
+            messages,
+            hasMore,
+            nextCursor: hasMore ? nextCursor : null
+        });
+    }
+
+    // If no data in database or there was an error, call the API
+    console.log(`No transcript found in database for call: ${callId}, calling API...`);
+    
+    
+    // Call the API to get the transcript
+    const callTranscriptsService = CallTranscriptsService.getInstance(c.req.env, c.req.db);
+    
+      const response = await callTranscriptsService.getCallTranscript(callId, 100);
+    
+   
+    const transcriptData = response;
+    
+    return c.json({
+        messages: transcriptData.results,
+        hasMore: transcriptData.next,
+        nextCursor: transcriptData.next
+    });
+      
+      
+  }
+  catch(error){
+    console.error("Get Call transcripts Error:", error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error,
+    }, 500);
+  }
 });
 
 app.route('/api/twilio', twilioRoutes);
@@ -428,6 +576,10 @@ app.post('/api/ultravox/createcall', async (c) => {
         status: 'error',
         message: 'UltraAgent API key missing',
       }, 500);
+    }
+
+    if(!body?.firstSpeaker){
+      body.firstSpeaker = "FIRST_SPEAKER_USER";
     }
 
     const response = await fetch('https://api.ultravox.ai/api/calls', {
