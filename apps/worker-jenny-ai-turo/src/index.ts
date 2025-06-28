@@ -429,11 +429,6 @@ app.get('/api/get-call-details' , async (c) => {
 
     if (error) {
       console.error("Get Call Details Error:", error);
-      return c.json({
-        status: 'error',
-        message: 'Internal Server Error',
-        error: error,
-      }, 500);
     }
 
     if ((!data || data.length === 0)  || (data[0].endReason !== 'unjoined' && (!data[0].short_summary  || !data[0].long_summary))) {

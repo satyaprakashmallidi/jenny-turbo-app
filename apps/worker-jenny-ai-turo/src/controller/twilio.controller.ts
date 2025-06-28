@@ -187,10 +187,8 @@ export async function finishCall(c: Context) {
         
         if(!response) {
           console.error("Background finishCall error: Missing response");
-          return c.json({
-            status: 'error',
-            message: 'Internal Server Error',
-          }, 500);
+          //get oout of if block
+          return;
         }
 
         let {userId , TimeTaken , callId} = response;
@@ -198,7 +196,7 @@ export async function finishCall(c: Context) {
         console.log("Call ID to delete: ", callId , userId , TimeTaken);
 
         if(!userId || !callId) {
-          userId = call?.metadata?.['user_id'];
+          userId = call?.metadata?.['user_id'] || call?.metadata?.['userId'];
           callId = call?.callId;
         }
 

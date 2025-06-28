@@ -9,6 +9,7 @@ toolRoutes.get('/', getAllTools);
 toolRoutes.get('/:toolId', getTool);
 toolRoutes.delete('/:toolId/deactivate', deactivateTool);
 toolRoutes.patch('/:toolId', updateTool);
+toolRoutes.put('/:toolId', updateTool);
 toolRoutes.delete('/:toolId', deleteTool);
 
 export default toolRoutes;
