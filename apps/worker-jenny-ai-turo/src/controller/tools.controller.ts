@@ -25,12 +25,12 @@ export const createTool = async (c: Context) => {
     }
 
     // Validate modelToolName format
-    if (body.definition?.modelToolName && !/^[a-zA-Z0-9_-]{1,64}$/.test(body.definition.modelToolName)) {
-      return c.json(
-        { error: "modelToolName must match pattern ^[a-zA-Z0-9_-]{1,64}$" },
-        { status: 400 }
-      );
-    }
+    // if (body.definition?.modelToolName && !/^[a-zA-Z0-9_-]{1,64}$/.test(body.definition.modelToolName)) {
+    //   return c.json(
+    //     { error: "modelToolName must match pattern ^[a-zA-Z0-9_-]{1,64}$" },
+    //     { status: 400 }
+    //   );
+    // }
 
     // Validate that either http or client is set, but not both
     if (body.definition?.http && body.definition?.client) {
@@ -64,6 +64,12 @@ export const createTool = async (c: Context) => {
 
     const toolService = ToolService.getInstance(env, c.req.db);
     const data = await toolService.createTool(body, userId);
+    if (data && typeof data === 'object' && 'error' in data) {
+      return c.json(
+        { error: data.error as string },
+        { status: 500 }
+      );
+    }
     return c.json(data);
   } catch (error) {
     console.error("Error creating tool:", error);
@@ -205,12 +211,22 @@ export const updateTool = async (c: Context) => {
     }
 
     const toolService = ToolService.getInstance(env, c.req.db);
-    await toolService.updateTool(toolId, userId, body);
+    const result = await toolService.updateTool(toolId, userId, body);
+
+    if (result && typeof result === 'object' && 'error' in result) {
+      console.log("this is the error" , result.error);
+      return c.json(
+        { error: result.error as string },
+        { status: 500 }
+      );
+    }
+
     return c.json({ success: true });
   } catch (error) {
     console.error("Error updating tool:", error);
+    let errorMessage = "Failed to update tool";
     return c.json(
-      { error: "Failed to update tool" },
+      { error: errorMessage },
       { status: 500 }
     );
   }

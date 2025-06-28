@@ -21,7 +21,7 @@ export class ToolService {
     return ToolService.instance;
   }
 
-  async createTool(request: CreateToolRequest, userId: string): Promise<CreateToolResponse> {
+  async createTool(request: CreateToolRequest, userId: string): Promise<CreateToolResponse | { error: string }> {
     try {
       // Validate and set default timeout
       if (!request.definition.timeout) {
@@ -74,7 +74,9 @@ export class ToolService {
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Error response:', errorText);
-        throw new Error(`Failed to create tool: ${errorText}`);
+        return {
+          error: errorText
+        }
       }
 
       const ultravoxTool = await response.json() as CreateToolResponse;
@@ -105,7 +107,7 @@ export class ToolService {
     }
   }
 
-  async updateTool(toolId: string, userId: string, request: Partial<CreateToolRequest>): Promise<void> {
+  async updateTool(toolId: string, userId: string, request: Partial<CreateToolRequest>): Promise<{ error: string } | Boolean> {
     try {
       // First update in Ultravox
       const response = await fetch(`${ULTRAVOX_TOOL_URL}/${toolId}`, {
@@ -119,7 +121,9 @@ export class ToolService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Failed to update tool in Ultravox: ${errorText}`);
+        return {
+          error: errorText
+        }
       }
 
       // Then update in Supabase
@@ -138,11 +142,17 @@ export class ToolService {
 
       if (error) {
         console.error('Error updating tool in database:', error);
-        throw new Error('Failed to update tool in database');
+        return {
+          error: "Failed to update tool in database"
+        }
       }
+
+      return true;
     } catch (error) {
       console.error('Error in updateTool:', error);
-      throw error;
+      return {
+        error: error instanceof Error ? error.message : "Failed to update tool in instance"
+      }
     }
   }
 
