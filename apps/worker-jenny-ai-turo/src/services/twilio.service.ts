@@ -465,6 +465,11 @@ export class TwilioService {
             metadata: {
                 botId,
                 userId,
+            },
+            experimentalSettings: {
+                backSeatDriver: true,
+                model: "o4-mini",
+                enableFunctionInsertion: true,
             }
         };
 

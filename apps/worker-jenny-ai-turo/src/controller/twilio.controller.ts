@@ -44,8 +44,20 @@ export async function makeCall(c: Context) {
       is_single_twilio_account: isSingleTwilioAccount
     } = body;
 
+    console.log("Body", body);
+
     const twilioService = TwilioService.getInstance();
     twilioService.setDependencies(c.req.db, c.req.env);
+
+    console.log("Call Config", callConfig);
+
+    // if(!callConfig?.experimentalSettings){
+    //   callConfig.experimentalSettings = {
+    //     backSeatDriver: true,
+    //     model: "o4-mini",
+    //     enableFunctionInsertion: true,
+    //   }
+    // }
 
 
     console.log("Transfering call to: ", transferTo);

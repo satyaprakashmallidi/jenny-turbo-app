@@ -577,6 +577,14 @@ app.post('/api/ultravox/createcall', async (c) => {
       body.firstSpeaker = "FIRST_SPEAKER_USER";
     }
 
+    if(!body?.experimentalSettings){
+      body.experimentalSettings = {
+        backSeatDriver: true,
+        model: "o4-mini",
+        enableFunctionInsertion: true,
+      }
+    }
+
     const response = await fetch('https://api.ultravox.ai/api/calls', {
       method: 'POST',
       headers: {
