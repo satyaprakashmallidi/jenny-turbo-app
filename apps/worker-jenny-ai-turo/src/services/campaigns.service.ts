@@ -278,4 +278,203 @@ export class CampaignsService {
       };
     }
   }
+
+  /**
+   * Get campaigns that are scheduled to run now
+   */
+  async getScheduledCampaigns(limit: number = 50): Promise<any[]> {
+    try {
+      const now = new Date().toISOString();
+      
+      const { data, error } = await this.db
+        .from('call_campaigns')
+        .select('*')
+        .eq('auto_start', true)
+        .eq('status', 'pending')
+        .lte('scheduled_start_time', now)
+        .order('scheduled_start_time', { ascending: true })
+        .limit(limit);
+
+      if (error) {
+        console.error('Get Scheduled Campaigns Error:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Get Scheduled Campaigns Error:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Calculate next execution time for recurring campaigns
+   */
+  calculateNextExecution(campaign: any): Date | null {
+    if (!campaign.is_recurring || !campaign.scheduled_start_time) {
+      return null;
+    }
+
+    const lastExecution = new Date(campaign.scheduled_start_time);
+    const interval = campaign.recurring_interval || 1;
+    let nextExecution: Date;
+
+    switch (campaign.recurring_type) {
+      case 'daily':
+        nextExecution = new Date(lastExecution.getTime() + (interval * 24 * 60 * 60 * 1000));
+        break;
+      case 'weekly':
+        nextExecution = new Date(lastExecution.getTime() + (interval * 7 * 24 * 60 * 60 * 1000));
+        break;
+      case 'monthly':
+        nextExecution = new Date(lastExecution);
+        nextExecution.setMonth(nextExecution.getMonth() + interval);
+        break;
+      default:
+        return null;
+    }
+
+    // Check if we've reached the end date or max executions
+    if (campaign.recurring_until && nextExecution > new Date(campaign.recurring_until)) {
+      return null;
+    }
+
+    if (campaign.max_executions && campaign.execution_count >= campaign.max_executions) {
+      return null;
+    }
+
+    return nextExecution;
+  }
+
+  /**
+   * Schedule next execution for recurring campaigns
+   */
+  async scheduleNextExecution(campaign_id: string): Promise<{ success: boolean; message: string; next_execution?: string }> {
+    try {
+      // Get campaign details
+      const { data: campaignData, error: campaignError } = await this.db
+        .from('call_campaigns')
+        .select('*')
+        .eq('campaign_id', campaign_id)
+        .single();
+
+      if (campaignError || !campaignData) {
+        return { success: false, message: 'Campaign not found' };
+      }
+
+      if (!campaignData.is_recurring) {
+        return { success: false, message: 'Campaign is not recurring' };
+      }
+
+      const nextExecution = this.calculateNextExecution(campaignData);
+      
+      if (!nextExecution) {
+        // Mark campaign as completed if no more executions
+        await this.db
+          .from('call_campaigns')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString()
+          })
+          .eq('campaign_id', campaign_id);
+
+        return { success: true, message: 'Campaign completed - no more executions scheduled' };
+      }
+
+      // Update campaign with next execution time and increment execution count
+      const { error: updateError } = await this.db
+        .from('call_campaigns')
+        .update({
+          scheduled_start_time: nextExecution.toISOString(),
+          execution_count: (campaignData.execution_count || 0) + 1,
+          status: 'pending',
+          updated_at: new Date().toISOString()
+        })
+        .eq('campaign_id', campaign_id);
+
+      if (updateError) {
+        return { success: false, message: 'Failed to schedule next execution', error: updateError.message };
+      }
+
+      return { 
+        success: true, 
+        message: 'Next execution scheduled successfully',
+        next_execution: nextExecution.toISOString()
+      };
+
+    } catch (error) {
+      console.error('Schedule Next Execution Error:', error);
+      return { 
+        success: false, 
+        message: 'Failed to schedule next execution', 
+        error: error instanceof Error ? error.message : String(error) 
+      };
+    }
+  }
+
+  /**
+   * Process scheduled campaigns (to be called by a cron job or scheduled task)
+   */
+  async processScheduledCampaigns(): Promise<{ success: boolean; processed_count: number; errors: any[] }> {
+    try {
+      const scheduledCampaigns = await this.getScheduledCampaigns(10); // Process up to 10 campaigns at a time
+      const errors: any[] = [];
+      let processedCount = 0;
+
+      for (const campaign of scheduledCampaigns) {
+        try {
+          // Create execution record for recurring campaigns
+          if (campaign.is_recurring) {
+            const execution_id = randomUUID();
+            await this.db
+              .from('campaign_executions')
+              .insert([{
+                execution_id,
+                campaign_id: campaign.campaign_id,
+                scheduled_time: campaign.scheduled_start_time,
+                status: 'in_progress',
+                total_contacts: campaign.total_contacts,
+                started_at: new Date().toISOString()
+              }]);
+          }
+
+          // Start the campaign
+          const result = await this.queueCampaignCalls(campaign.campaign_id);
+          
+          if (result.success) {
+            // For recurring campaigns, schedule the next execution
+            if (campaign.is_recurring) {
+              await this.scheduleNextExecution(campaign.campaign_id);
+            }
+            processedCount++;
+          } else {
+            errors.push({
+              campaign_id: campaign.campaign_id,
+              error: result.error || result.message
+            });
+          }
+
+        } catch (campaignError) {
+          errors.push({
+            campaign_id: campaign.campaign_id,
+            error: campaignError instanceof Error ? campaignError.message : String(campaignError)
+          });
+        }
+      }
+
+      return {
+        success: true,
+        processed_count: processedCount,
+        errors
+      };
+
+    } catch (error) {
+      console.error('Process Scheduled Campaigns Error:', error);
+      return {
+        success: false,
+        processed_count: 0,
+        errors: [{ error: error instanceof Error ? error.message : String(error) }]
+      };
+    }
+  }
 }

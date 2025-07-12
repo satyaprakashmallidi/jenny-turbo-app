@@ -40,3 +40,6 @@ max_retries = 100
 [observability]
 enabled = true
 head_sampling_rate = 1
+
+[triggers]
+crons = ["*/1 * * * *"]  # Run every 5 minutes

@@ -4,7 +4,7 @@ import { CampaignsService } from "../services/campaigns.service";
 
 /**
  * POST /campaigns
- * Body: { campaign_name, bot_id, bot_name, twilio_phone_number, system_prompt, voice_settings, field_mappings, contacts, notes? }
+ * Body: { campaign_name, bot_id, bot_name, twilio_phone_number, system_prompt, voice_settings, field_mappings, contacts, notes?, scheduling? }
  * Returns: { campaign_id, status }
  */
 export async function createCampaign(c: Context) {
@@ -20,7 +20,8 @@ export async function createCampaign(c: Context) {
       field_mappings,
       contacts,
       notes,
-      user_id
+      user_id,
+      scheduling
     } = payload;
 
     if (!campaign_name || !bot_id || !contacts || !Array.isArray(contacts)) {
@@ -33,23 +34,41 @@ export async function createCampaign(c: Context) {
     const db = c.req.db;
     const campaign_id = randomUUID();
 
+    // Prepare campaign data with optional scheduling fields
+    const campaignData: any = {
+      campaign_id,
+      user_id,
+      campaign_name,
+      bot_id,
+      bot_name,
+      twilio_phone_number,
+      system_prompt,
+      voice_settings,
+      field_mappings,
+      total_contacts: contacts.length,
+      notes,
+      status: 'pending'
+    };
+
+    // Add scheduling fields if provided
+    if (scheduling) {
+      campaignData.scheduled_start_time = scheduling.scheduled_start_time;
+      campaignData.timezone = scheduling.timezone || 'UTC';
+      campaignData.is_recurring = scheduling.is_recurring || false;
+      campaignData.auto_start = scheduling.auto_start || false;
+      
+      if (scheduling.is_recurring) {
+        campaignData.recurring_type = scheduling.recurring_type || 'none';
+        campaignData.recurring_interval = scheduling.recurring_interval || 1;
+        campaignData.recurring_until = scheduling.recurring_until;
+        campaignData.max_executions = scheduling.max_executions;
+      }
+    }
+
     // Create campaign
-    const { data: campaignData, error: campaignError } = await db
+    const { data: campaignResult, error: campaignError } = await db
       .from('call_campaigns')
-      .insert([{
-        campaign_id,
-        user_id,
-        campaign_name,
-        bot_id,
-        bot_name,
-        twilio_phone_number,
-        system_prompt,
-        voice_settings,
-        field_mappings,
-        total_contacts: contacts.length,
-        notes,
-        status: 'pending'
-      }])
+      .insert([campaignData])
       .select()
       .single();
 
@@ -481,6 +500,194 @@ export async function deleteCampaign(c: Context) {
     return c.json({ 
       status: 'error', 
       message: 'Failed to delete campaign', 
+      error: error instanceof Error ? error.message : error 
+    }, 500);
+  }
+}
+
+/**
+ * PUT /campaigns/:campaign_id/schedule
+ * Updates campaign scheduling settings
+ * Body: { scheduled_start_time?, timezone?, is_recurring?, recurring_type?, recurring_interval?, recurring_until?, max_executions?, auto_start? }
+ * Returns: { status, message }
+ */
+export async function updateCampaignSchedule(c: Context) {
+  try {
+    const campaign_id = c.req.param('campaign_id');
+    const payload = await c.req.json();
+    
+    if (!campaign_id) {
+      return c.json({ 
+        status: 'error', 
+        message: 'Missing campaign_id' 
+      }, 400);
+    }
+
+    const db = c.req.db;
+    
+    const updateData: any = {
+      updated_at: new Date().toISOString()
+    };
+
+    // Add scheduling fields if provided
+    if (payload.scheduled_start_time !== undefined) updateData.scheduled_start_time = payload.scheduled_start_time;
+    if (payload.timezone !== undefined) updateData.timezone = payload.timezone;
+    if (payload.is_recurring !== undefined) updateData.is_recurring = payload.is_recurring;
+    if (payload.auto_start !== undefined) updateData.auto_start = payload.auto_start;
+    
+    if (payload.is_recurring) {
+      if (payload.recurring_type !== undefined) updateData.recurring_type = payload.recurring_type;
+      if (payload.recurring_interval !== undefined) updateData.recurring_interval = payload.recurring_interval;
+      if (payload.recurring_until !== undefined) updateData.recurring_until = payload.recurring_until;
+      if (payload.max_executions !== undefined) updateData.max_executions = payload.max_executions;
+    }
+
+    const { error: updateError } = await db
+      .from('call_campaigns')
+      .update(updateData)
+      .eq('campaign_id', campaign_id);
+
+    if (updateError) {
+      console.error('Update Campaign Schedule Error:', updateError);
+      return c.json({ 
+        status: 'error', 
+        message: 'Failed to update campaign schedule', 
+        error: updateError.message 
+      }, 500);
+    }
+
+    return c.json({
+      status: 'success',
+      message: 'Campaign schedule updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Update Campaign Schedule Error:', error);
+    return c.json({ 
+      status: 'error', 
+      message: 'Failed to update campaign schedule', 
+      error: error instanceof Error ? error.message : error 
+    }, 500);
+  }
+}
+
+/**
+ * GET /campaigns/scheduled
+ * Gets campaigns that are ready to be executed based on their schedule
+ * Query: user_id?, limit?
+ * Returns: { status, campaigns }
+ */
+export async function getScheduledCampaigns(c: Context) {
+  try {
+    const user_id = c.req.query('user_id');
+    const limit = parseInt(c.req.query('limit') || '50');
+    const now = new Date().toISOString();
+    
+    const db = c.req.db;
+    
+    let query = db
+      .from('call_campaigns')
+      .select('*')
+      .eq('auto_start', true)
+      .eq('status', 'pending')
+      .lte('scheduled_start_time', now)
+      .order('scheduled_start_time', { ascending: true })
+      .limit(limit);
+
+    if (user_id) {
+      query = query.eq('user_id', user_id);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Get Scheduled Campaigns Error:', error);
+      return c.json({ 
+        status: 'error', 
+        message: 'Failed to fetch scheduled campaigns', 
+        error: error.message 
+      }, 500);
+    }
+
+    return c.json({
+      status: 'success',
+      campaigns: data || []
+    });
+
+  } catch (error) {
+    console.error('Get Scheduled Campaigns Error:', error);
+    return c.json({ 
+      status: 'error', 
+      message: 'Failed to fetch scheduled campaigns', 
+      error: error instanceof Error ? error.message : error 
+    }, 500);
+  }
+}
+
+/**
+ * POST /campaigns/:campaign_id/executions
+ * Creates a new execution record for a recurring campaign
+ * Returns: { status, execution_id }
+ */
+export async function createCampaignExecution(c: Context) {
+  try {
+    const campaign_id = c.req.param('campaign_id');
+    
+    if (!campaign_id) {
+      return c.json({ 
+        status: 'error', 
+        message: 'Missing campaign_id' 
+      }, 400);
+    }
+
+    const db = c.req.db;
+    const execution_id = randomUUID();
+    
+    // Get campaign details
+    const { data: campaignData, error: campaignError } = await db
+      .from('call_campaigns')
+      .select('*')
+      .eq('campaign_id', campaign_id)
+      .single();
+
+    if (campaignError || !campaignData) {
+      return c.json({ 
+        status: 'error', 
+        message: 'Campaign not found' 
+      }, 404);
+    }
+
+    // Create execution record
+    const { error: executionError } = await db
+      .from('campaign_executions')
+      .insert([{
+        execution_id,
+        campaign_id,
+        scheduled_time: new Date().toISOString(),
+        status: 'pending',
+        total_contacts: campaignData.total_contacts
+      }]);
+
+    if (executionError) {
+      console.error('Create Campaign Execution Error:', executionError);
+      return c.json({ 
+        status: 'error', 
+        message: 'Failed to create campaign execution', 
+        error: executionError.message 
+      }, 500);
+    }
+
+    return c.json({
+      status: 'success',
+      execution_id,
+      message: 'Campaign execution created successfully'
+    });
+
+  } catch (error) {
+    console.error('Create Campaign Execution Error:', error);
+    return c.json({ 
+      status: 'error', 
+      message: 'Failed to create campaign execution', 
       error: error instanceof Error ? error.message : error 
     }, 500);
   }

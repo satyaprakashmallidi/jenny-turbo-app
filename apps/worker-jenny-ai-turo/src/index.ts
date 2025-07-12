@@ -16,6 +16,18 @@ import campaignsRoutes from './routes/campaigns.routes';
 //@ts-ignore
 import { env } from 'hono';
 
+// Types for Cloudflare Workers
+interface ScheduledController {
+  scheduledTime: number;
+  cron: string;
+  noRetry(): void;
+}
+
+interface ExecutionContext {
+  waitUntil(promise: Promise<any>): void;
+  passThroughOnException(): void;
+}
+
 //Caching Voices
 let cachedVoices: any = null;
 let lastCacheTime = 0;
@@ -873,6 +885,36 @@ app.get('/api/get-all-calls-of-user', async (c) => {
 
 export default {
   fetch: app.fetch,
+  async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext): Promise<void> {
+    // Import dependencies
+    const { getSupabaseClient } = await import('./lib/supabase/client');
+    const { getEnv } = await import('./config/env');
+    const { CampaignsService } = await import('./services/campaigns.service');
+    
+    try {
+      console.log('Scheduled task running at:', new Date().toISOString());
+      
+      // Initialize Supabase client
+      const processedEnv = getEnv(env);
+      const supabase = getSupabaseClient(processedEnv);
+      
+      // Initialize campaigns service
+      const campaignsService = CampaignsService.getInstance();
+      campaignsService.setDependencies(supabase, processedEnv);
+      
+      // Process scheduled campaigns
+      const result = await campaignsService.processScheduledCampaigns();
+      
+      console.log('Scheduled campaigns processed:', result);
+      
+      if (result.errors.length > 0) {
+        console.error('Errors processing scheduled campaigns:', result.errors);
+      }
+      
+    } catch (error) {
+      console.error('Error in scheduled task:', error);
+    }
+  },
   queue: async (batch: MessageBatch<any> , env : env ) => {
     // Import here to avoid circular dependencies
     const { getSupabaseClient } = await import('./lib/supabase/client');
