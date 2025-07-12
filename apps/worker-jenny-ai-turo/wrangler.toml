@@ -17,6 +17,14 @@ SUPABASE_SERVICE_ROLE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 binding = "ACTIVE_CALLS"
 id = "b83dfc8af736463494a20584354e6507"
 
+[[queues.producers]]
+queue = "calls-que"
+binding = "calls_que"
+
+[[queues.consumers]]
+queue = "calls-que"
+max_retries = 100
+
 # [[r2_buckets]]
 # binding = "MY_BUCKET"
 # bucket_name = "my-bucket"

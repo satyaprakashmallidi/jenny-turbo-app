@@ -1,8 +1,8 @@
-import { CallConfig, CallConfigWebhookResponse, JoinUrlResponse, twilioData } from "@repo/common-types/types";
+import { CallConfig, CallConfigWebhookResponse, JoinUrlResponse, twilioData } from "../types/repo-common-types";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { Env } from "../config/env";
 import twilio from 'twilio';
-import VoiceResponse, { name } from "twilio/lib/twiml/VoiceResponse";
+import VoiceResponse from "twilio/lib/twiml/VoiceResponse";
 
 type CallRecord = {
     config: CallConfig;
@@ -465,6 +465,8 @@ export class TwilioService {
             metadata: {
                 botId,
                 userId,
+                bot_id: botId,
+                user_id: userId,
             },
             experimentalSettings: {
                 backSeatDriver: true,
@@ -472,6 +474,22 @@ export class TwilioService {
                 enableFunctionInsertion: true,
             }
         };
+
+        if(!callConfig.metadata){
+            callConfig.metadata = {};
+        }
+
+        if(call_config?.metadata?.job_id){
+            callConfig.metadata.job_id = call_config.metadata.job_id;
+        }
+
+        if(call_config?.metadata?.contact_id){
+            callConfig.metadata.contact_id = call_config.metadata.contact_id;
+        }
+
+        if(call_config?.metadata?.campaign_id){
+            callConfig.metadata.campaign_id = call_config.metadata.campaign_id;
+        }
 
         if(!callConfig.selectedTools?.some((tool: any) => tool.toolName === "hangUp")) {
             callConfig.selectedTools?.push({
@@ -494,8 +512,12 @@ export class TwilioService {
             },
             body: JSON.stringify(callConfig),
         });
-
         if (!ultravoxResponse.ok) {
+
+            if(ultravoxResponse.status === 429){
+                throw new Error("concurency limit");
+            }
+
             const errorText = await ultravoxResponse.text();
             throw new Error(`${errorText}`);
         }

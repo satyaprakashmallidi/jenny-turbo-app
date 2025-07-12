@@ -212,6 +212,66 @@ export async function finishCall(c: Context) {
           callId = call?.callId;
         }
 
+        // Update campaign contact if this is a campaign call
+        const campaign_id = call?.metadata?.['campaign_id'];
+        const contact_id = call?.metadata?.['contact_id'];
+        const job_id = call?.metadata?.['job_id'];
+
+        if (campaign_id && contact_id) {
+          console.log("Updating campaign contact:", { campaign_id, contact_id, callId });
+          
+          // Calculate call duration from joined to ended timestamps
+          let callDuration = 0;
+          if (call.joined && call.ended) {
+            const joinedTime = new Date(call.joined).getTime();
+            const endedTime = new Date(call.ended).getTime();
+            callDuration = Math.floor((endedTime - joinedTime) / 1000); // Duration in seconds
+          }
+
+          const updateData: any = {
+            call_status: 'completed',
+            completed_at: new Date().toISOString(),
+            call_duration: callDuration
+          };
+
+          // Add call summary if available
+          if (call.shortSummary) {
+            updateData.call_summary = call.shortSummary;
+          }
+          if (call.summary) {
+            updateData.call_notes = call.summary;
+          }
+
+          // Update the campaign contact
+          const { error: contactUpdateError } = await c.req.db
+            .from('call_campaign_contacts')
+            .update(updateData)
+            .eq('contact_id', contact_id);
+
+          if (contactUpdateError) {
+            console.error("Error updating campaign contact:", contactUpdateError);
+          } else {
+            console.log("Successfully updated campaign contact");
+          }
+
+          // Update call job status
+          if (job_id) {
+            await c.req.db
+              .from('call_jobs')
+              .update({
+                status: 'completed',
+                result: {
+                  call_id: callId,
+                  duration: callDuration,
+                  summary: call.shortSummary || call.summary,
+                  end_reason: call.endReason
+                },
+                updated_at: new Date().toISOString()
+              })
+              .eq('job_id', job_id);
+          }
+        }
+
         if(!userId || !TimeTaken || !callId) {
          console.error("Background finishCall error: Missing userId or TimeTaken");
           return c.json({

@@ -30,6 +30,7 @@ export interface Env {
     SUPABASE_KEY?: string;
     executionCtx?: ExecutionContext;
     ACTIVE_CALLS: KVNamespace;
+    calls_que: Queue<any>; // Add this line for Cloudflare Queue binding
 }
 
 export function getEnv(env: any): Env {
@@ -43,11 +44,13 @@ export function getEnv(env: any): Env {
         SUPABASE_ANON_KEY: result.data.SUPABASE_ANON_KEY,
         APP_URL: result.data.APP_URL,
         ULTRAVOX_API_KEY: result.data.ULTRAVOX_API_KEY,
+        ULTRAVOX_API_URL: result.data.ULTRAVOX_API_URL,
         GOOGLE_CLIENT_ID: result.data.GOOGLE_CLIENT_ID,
         GOOGLE_CLIENT_SECRET: result.data.GOOGLE_CLIENT_SECRET,
         SUPABASE_SERVICE_ROLE_KEY: result.data.SUPABASE_SERVICE_ROLE_KEY,
         SUPABASE_KEY: result.data.SUPABASE_KEY,
         executionCtx: result.data.executionCtx,
-        ACTIVE_CALLS: result.data.ACTIVE_CALLS
+        ACTIVE_CALLS: result.data.ACTIVE_CALLS,
+        calls_que: (env.calls_que as any), // Add this line for the queue binding
     };
 }

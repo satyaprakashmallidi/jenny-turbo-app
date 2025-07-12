@@ -2,7 +2,7 @@ import { createApp } from './config/hono'
 import twilioRoutes from './routes/twilio.routes'
 import agentRoutes from './routes/agents.routes'
 import toolRoutes from './routes/tools.routes'
-import { CallConfig, CallConfigWebhookResponse } from '@repo/common-types/types';
+import { CallConfig, CallConfigWebhookResponse } from './types/repo-common-types';
 import { finishCall } from './controller/twilio.controller';
 import corpusRoutes from './routes/corpus.routes'
 import singleTwilioRoutes from './routes/single-twilio-account.routes'
@@ -11,6 +11,10 @@ import { CallDetails } from './controller/twilio.controller';
 import Voice from 'twilio/lib/rest/Voice';
 import { TwilioService } from './services/twilio.service';
 import { CallTranscriptsService } from './services/call-transcripts.service';
+import queuedCallsRoutes from './routes/queued-calls.routes';
+import campaignsRoutes from './routes/campaigns.routes';
+//@ts-ignore
+import { env } from 'hono';
 
 //Caching Voices
 let cachedVoices: any = null;
@@ -42,7 +46,7 @@ app.post('/api/set-twilio-webhook', async (c) => {
     },
   });
 
-  const sid_data = await sid_response.json();
+  const sid_data = await sid_response.json() as { incoming_phone_numbers: { sid: string }[] };
 
   const phone_number_sid = sid_data?.incoming_phone_numbers?.[0]?.sid;
 
@@ -177,7 +181,7 @@ app.get('/api/inbound', async (c) => {
     supabase: c.req.db,
     env: c.req.env,
     temperature: temperature>0 ? Number(`0.${temperature}`) : 0,
-    callSid,
+    callSid: callSid as string,
     twilioFromNumber: twilio_phone_number,
     transferTo: is_call_transfer_allowed ? call_transfer_number : undefined,
   })
@@ -402,6 +406,8 @@ app.get('/api/transcript', async (c) => {
   }
 });
 
+app.route('/api/queued-calls', queuedCallsRoutes);
+app.route('/api/campaigns', campaignsRoutes);
 app.route('/api/twilio', twilioRoutes);
 app.route('/api/agent', agentRoutes);
 app.route('/api/tools', toolRoutes);
@@ -546,7 +552,7 @@ app.get('/api/mind-dost', async (c) => {
       }, 500);
     }
 
-    const data = await response.json();
+    const data = await response.json() as CallConfigWebhookResponse;
     return c.json({
       status: 'success',
       join_url: data?.joinUrl
@@ -864,4 +870,128 @@ app.get('/api/get-all-calls-of-user', async (c) => {
   }
 });
 
-export default app;
+
+export default {
+  fetch: app.fetch,
+  queue: async (batch: MessageBatch<any> , env : env ) => {
+    // Import here to avoid circular dependencies
+    const { getSupabaseClient } = await import('./lib/supabase/client');
+    const { getEnv } = await import('./config/env');
+    
+    for (const msg of batch.messages) {
+      const { job_id, payload } = msg.body;
+      
+      // Properly initialize Supabase client for queue context
+      const processedEnv = getEnv(env);
+      const supabase = getSupabaseClient(processedEnv);
+      try {
+        // Insert or update job status to 'processing'
+        await supabase.from('call_jobs').upsert({ job_id, status: 'processing', updated_at: new Date().toISOString() }, { onConflict: 'job_id' });
+        
+        // Update campaign contact status if this is a campaign call
+        if (payload.campaign_id && payload.contact_id) {
+          await supabase
+            .from('call_campaign_contacts')
+            .update({
+              call_status: 'in_progress',
+              started_at: new Date().toISOString()
+            })
+            .eq('contact_id', payload.contact_id);
+        }
+
+        let ultravoxData = null;
+        let callId = null;
+        while (true) {
+          try {
+            // Call TwilioService.makeCall
+            const twilioService = TwilioService.getInstance();
+            twilioService.setDependencies(supabase, processedEnv);
+            
+            payload.callConfig.metadata = {
+              ...payload.callConfig.metadata,
+              job_id: job_id
+            };
+
+            console.log("Queue Processing Payload", payload);
+            const result = await twilioService.makeCall({ ...payload, supabase, env });
+            // Extract callId from result (if present)
+            callId = result?.callId || null;
+            ultravoxData = result;
+            break; // Success, exit retry loop
+          } catch (error) {
+            console.log("Queue Processing Error", error);
+            // If Ultravox returns 429, retry after 60s
+            if (error instanceof Error && error.message && error.message.toLowerCase().includes('concurency limit')) {
+              await msg.retry({
+                delaySeconds: 60
+              })
+              continue;
+            } else {
+              // Other error, mark as failed
+              await supabase.from('call_jobs').upsert({ 
+                job_id, 
+                status: 'failed', 
+                error_message: error instanceof Error ? error.message : String(error), 
+                updated_at: new Date().toISOString(), 
+                processed_at: new Date().toISOString() 
+              }, { onConflict: 'job_id' });
+
+              // Update campaign contact status if this is a campaign call
+              if (payload.campaign_id && payload.contact_id) {
+                await supabase
+                  .from('call_campaign_contacts')
+                  .update({
+                    call_status: 'failed',
+                    error_message: error instanceof Error ? error.message : String(error),
+                    completed_at: new Date().toISOString()
+                  })
+                  .eq('contact_id', payload.contact_id);
+              }
+              return;
+            }
+          }
+        }
+        // Success: update job with callId
+        await supabase.from('call_jobs').upsert({ 
+          job_id, 
+          status: 'success', 
+          ultravox_call_id: callId,
+          updated_at: new Date().toISOString(), 
+          processed_at: new Date().toISOString() 
+        }, { onConflict: 'job_id' });
+
+        // Update campaign contact with call ID if this is a campaign call
+        if (payload.campaign_id && payload.contact_id && callId) {
+          await supabase
+            .from('call_campaign_contacts')
+            .update({
+              ultravox_call_id: callId,
+              call_status: 'in_progress' // Will be updated to completed by webhook
+            })
+            .eq('contact_id', payload.contact_id);
+        }
+
+      } catch (error) {
+        await supabase.from('call_jobs').upsert({ 
+          job_id, 
+          status: 'failed', 
+          error_message: error instanceof Error ? error.message : String(error), 
+          updated_at: new Date().toISOString(), 
+          processed_at: new Date().toISOString() 
+        }, { onConflict: 'job_id' });
+
+        // Update campaign contact status if this is a campaign call
+        if (payload.campaign_id && payload.contact_id) {
+          await supabase
+            .from('call_campaign_contacts')
+            .update({
+              call_status: 'failed',
+              error_message: error instanceof Error ? error.message : String(error),
+              completed_at: new Date().toISOString()
+            })
+            .eq('contact_id', payload.contact_id);
+        }
+      }
+    }
+  }
+}
