@@ -275,3 +275,152 @@ export interface CallConfig {
     created_at: string;
     callId: string;
   }
+
+
+  export interface CalendarAccount {
+    id: string;
+    user_id: string;
+    access_token: string;
+    refresh_token: string;
+    calendar_email: string;
+    expires_at: string;
+  }
+  
+  
+  export interface Voice {
+    voiceId: string;
+    name: string;
+    previewUrl: string;
+  }
+  
+  
+  // these are for Ultravox Espescially
+  export interface JoinUrlResponse {
+    callId: string;
+    created: Date;
+    ended: Date | null;
+    model: string;
+    systemPrompt: string;
+    temperature: number;
+    joinUrl: string;
+    error?: string;
+  }
+
+  
+  export interface Message {
+    ordinal?: number;
+    role: RoleEnum;
+    text: string;
+    invocationId?: string;
+    toolName?: string;
+  }
+  
+  export interface SelectedTool {
+    toolId?: string;
+    toolName?: string;
+    temporaryTool?: BaseToolDefinition;
+    nameOverride?: string;
+    authTokens?: { [key: string]: string };
+    parameterOverrides?: { [key: string]: any };
+  }
+  
+  export interface BaseToolDefinition {
+    modelToolName?: string;
+    description: string;
+    dynamicParameters?: DynamicParameter[];
+    staticParameters?: StaticParameter[];
+    automaticParameters?: AutomaticParameter[];
+    requirements?: ToolRequirements;
+    http?: BaseHttpToolDetails;
+    client?: {};
+  }
+  
+  interface DynamicParameter {
+    name: string;
+    location: ParameterLocation;
+    schema: object;
+    required?: boolean;
+  }
+  
+  interface StaticParameter {
+    name: string;
+    location: ParameterLocation;
+    value: any;
+  }
+  
+  interface AutomaticParameter {
+    name: string;
+    location: ParameterLocation;
+    knownValue: KnownParamEnum;
+  }
+  
+  interface BaseHttpToolDetails {
+    baseUrlPattern: string;
+    httpMethod: string;
+  }
+  
+  interface ToolRequirements {
+    httpSecurityOptions: SecurityOptions;
+    requiredParameterOverrides: string[];
+  }
+  
+  interface SecurityOptions {
+    options: SecurityRequirements[];
+  }
+  
+  interface SecurityRequirements {
+    requirements: { [key: string]: SecurityRequirement };
+  }
+  
+  interface SecurityRequirement {
+    queryApiKey?: QueryApiKeyRequirement;
+    headerApiKey?: HeaderApiKeyRequirement;
+    httpAuth?: HttpAuthRequirement;
+  }
+  
+  interface QueryApiKeyRequirement {
+    name: string;
+  }
+  
+  interface HeaderApiKeyRequirement {
+    name: string;
+  }
+  
+  interface HttpAuthRequirement {
+    scheme: string;
+  }
+  
+  export interface DemoConfig {
+    title: string;
+    overview: string;
+    callConfig: CallConfig;
+  }
+
+  
+  export interface CallStageTask {
+    stageNumber: number;
+    stageName?: AvailableCallStage;
+    stageDescription?: string;
+    stagePrompt?: string;
+  }
+  
+  export interface NavigateConversation {
+    data: object;
+    new_data: object;
+    next_stage: AvailableCallStage | undefined;
+    current_stage: AvailableCallStage;
+  }
+  
+  
+  
+  export interface Appointment {
+    id: string;
+    bot_id: string;
+    customer_name: string;
+    customer_phone: string;
+    date: string;
+    time: string;
+    status: 'pending' | 'confirmed' | 'cancelled';
+    created_at: string;
+  }
+  

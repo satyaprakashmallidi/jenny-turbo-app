@@ -117,13 +117,20 @@ export class CampaignsService {
             // Process system prompt with field mappings
             let processedSystemPrompt = campaignData.system_prompt;
             if (campaignData.field_mappings && contact.contact_data) {
+              // console.log('Original system prompt:', campaignData.system_prompt);
+              // console.log('Field mappings:', campaignData.field_mappings);
+              // console.log('Contact data:', contact.contact_data);
+              
               Object.entries(campaignData.field_mappings).forEach(([placeholder, fieldName]) => {
                 const value = contact.contact_data[fieldName as string] || '';
+                const pattern = `\\<\\<\\<${placeholder}\\>\\>\\>`;
+                // console.log(`Replacing <<<${placeholder}>>> with: "${value}"`);
                 processedSystemPrompt = processedSystemPrompt.replace(
-                  new RegExp(`\\{\\{${placeholder}\\}\\}`, 'g'), 
+                  new RegExp(pattern, 'g'), 
                   value
                 );
               });
+              
             }
 
             // Create call configuration matching the expected format

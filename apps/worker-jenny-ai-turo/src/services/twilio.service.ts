@@ -3,6 +3,7 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { Env } from "../config/env";
 import twilio from 'twilio';
 import VoiceResponse from "twilio/lib/twiml/VoiceResponse";
+import { SelectedTool } from "@repo/common-types/types";
 
 type CallRecord = {
     config: CallConfig;
@@ -24,6 +25,14 @@ interface TransferCallRequest {
     transferReason: string;
     urgencyLevel: UrgencyLevel;
 }
+
+enum ParameterLocation {
+    UNSPECIFIED = "PARAMETER_LOCATION_UNSPECIFIED",
+    QUERY = "PARAMETER_LOCATION_QUERY",
+    PATH = "PARAMETER_LOCATION_PATH",
+    HEADER = "PARAMETER_LOCATION_HEADER",
+    BODY = "PARAMETER_LOCATION_BODY",
+  }
 
 export class TwilioService {
     private static instance: TwilioService;
@@ -343,8 +352,9 @@ export class TwilioService {
         env: Env;
         transferTo?: string;
         isSingleTwilioAccount?: boolean;
+        configureBots?: boolean;
     }) {
-        const { botId, toNumber, twilioFromNumber, userId, placeholders, tools, supabase, env, transferTo, isSingleTwilioAccount, callConfig : call_config } = params;
+        const { botId, toNumber, twilioFromNumber, userId, placeholders, tools, supabase, env, transferTo, isSingleTwilioAccount, callConfig : call_config, configureBots } = params;
 
         let account_sid = "";
         let auth_token = "";
@@ -363,8 +373,6 @@ export class TwilioService {
             if (botError) {
                 throw new Error("Bot not found");
             }
-        
-
         // Get Twilio number details
         const { data: twilioNumber, error: twilioNumberError } = await supabase
             .from('twilio_phone_numbers')
@@ -446,6 +454,11 @@ export class TwilioService {
                 }
                 return null;
             }).filter(Boolean) as ToolItem[]; 
+        }
+
+        if(configureBots){
+            const tools = await this.configureBotTools(botId , userId , supabase);
+            processedTools.push(...tools);
         }
 
         let callConfig: CallConfig = {
@@ -744,6 +757,392 @@ export class TwilioService {
             return;
         }
         delete this.activeCalls[callSid];
+    }
+
+    private async configureBotTools(botId: string, userId: string, supabase: SupabaseClient): Promise<SelectedTool[]> {
+        try{
+            const { data : bot, error: errorBots } = await supabase
+            .from('bots')
+            .select('*')
+            .eq('id', botId)
+            .eq('user_id', userId)
+            .single() as {
+                data: {
+                    id: string;
+                    phone_number: string;
+                    voice: string;
+                    system_prompt: string;
+                    user_id: any[];
+                    created_at: string;
+                    name: string;
+                    is_appointment_booking_allowed: string;
+                    appointment_tool_id: string;
+                    knowledge_base_id: string;
+                };
+                error: any;
+            };
+            // bot data type
+
+            if(errorBots){
+                throw new Error('Failed to fetch bots');
+            }
+
+            const tools: SelectedTool[] = [];
+
+            if(bot.is_appointment_booking_allowed){
+                const appointmentTools = await this.configureAppointmentTool(bot.appointment_tool_id, botId, userId, supabase);
+                tools.push(...appointmentTools);
+            }
+
+            if(bot.knowledge_base_id){
+                tools.push({
+                    toolName: "queryCorpus",
+                    parameterOverrides: {
+                        corpus_id: bot.knowledge_base_id,
+                        max_results: 5,
+                    }
+                })
+            };
+
+            return tools;
+        }
+        catch(error){
+            console.error("Error configuring bot tools:", error);
+            return [];
+        }
+    }
+
+    private async configureAppointmentTool(appointmentToolId: string, botId: string, userId: string, supabase: SupabaseClient): Promise<any[]> {
+        try{
+            const tools: SelectedTool[] = [];
+
+            const { data : appointmentData, error: errorAppointmentTool } = await supabase
+            .from('appointment_tools')
+            .select('*')
+            .eq('id', appointmentToolId) as {
+                data: {
+                    id: string;
+                    description: string;
+                    calendar_account_id: string;
+                    business_hours: string;
+                    appointment_duration: number;
+                    appointment_types: string[];
+                    calendar_email: string;
+                    prompt_template: string;
+                }[];
+                error: any;
+            }
+
+            if(!appointmentData || appointmentData.length === 0 || errorAppointmentTool){
+                throw new Error('Failed to fetch appointment tool');
+            }
+
+            const calendarAccount = await this.getUserCalendarAccount(userId, supabase);
+
+            if(!calendarAccount){
+                throw new Error('Failed to fetch user calendar account');
+            }
+
+            const appointmentTool = appointmentData.find((appointment) => appointment.id === appointmentToolId);
+
+            if(!appointmentTool){
+                throw new Error('Failed to fetch (found) appointment tool');
+            }
+
+            const actualCalendar = await this.getCallendarById(appointmentTool?.calendar_account_id, supabase);
+
+            const { access_token, refresh_token, calendar_email, expires_at } = actualCalendar[0];
+
+            if(!access_token || !refresh_token || !calendar_email || !expires_at){
+                throw new Error('Failed to fetch calendar account');
+            }
+
+            const appointmentTypes = (await this.getAppointmentTypes(appointmentTool)).appointmentTypes;
+
+            const staticParameters = [
+                {
+                    name: "access_token",
+                    location: ParameterLocation.QUERY,
+                    value: access_token || "not_found",
+                },
+                {
+                    name: "refresh_token",
+                    location: ParameterLocation.QUERY,
+                    value: refresh_token || "not_found",
+                },
+                {
+                    name: "calendar_id",
+                    location: ParameterLocation.QUERY,
+                    value: appointmentTool?.calendar_account_id || "",
+                }
+            ]
+
+            const bookingTool: SelectedTool = {
+                temporaryTool:{
+                  modelToolName: "bookAppointment",
+                  description: `The current date is ${new Date().toDateString().split('T')[0]} \n\nIMPORTANT: Our appointment types have specific default durations, but we can be flexible if needed.\n- ${appointmentTypes.map(type => `${type.name}: ${type.duration} minutes`).join('\n- ')}\n\nIf a caller specifically requests a different duration, you should accommodate their request when possible. Always confirm the appointment type AND duration with the caller before booking.\n\nCRITICAL RESPONSE VALIDATION INSTRUCTIONS:\n1. After calling bookAppointment, carefully check the response:\n   - Look for "success": true in the response\n   - Verify the response contains appointment details\n   - Check for any error messages\n   - Only proceed if the response indicates a successful booking\n\n2. For successful bookings (when response has success: true):\n   - Immediately confirm the booking to the user\n   - Share the appointment details (date, time, type)\n   - Do NOT mention any technical details or API responses\n   - Do NOT ask for additional confirmation\n   - Do NOT retry the booking\n\n3. For failed bookings:\n   - Check the specific error message\n   - Handle common errors (past date, timezone, etc.)\n   - Only retry if the error is recoverable\n   - After 2 failed attempts, suggest trying again later\n\n4. NEVER:\n   - Ignore a successful response\n   - Retry after a successful booking\n   - Show technical error messages to the user\n   - Ask for confirmation after a successful booking\n   - Mention API responses or technical details\n\n5. Example successful response handling:\n   If response is: { "success": true, "appointment": { ... } }\n   Say: "Perfect! I've booked your appointment for [date] at [time]."\n\n6. Example error handling:\n   If response has error: "Cannot book appointments in the past"\n   Say: "I'm sorry, but that date has already passed. Could you choose a future date?"\n\n7. Response Validation Steps:\n   a. Check success status first\n   b. If success is true, confirm booking immediately\n   c. If success is false, check error message\n   d. Handle error appropriately\n   e. Only retry if error is recoverable\n   f. After 2 failures, suggest trying again later\n\n8. Success Confirmation Format:\n   ✓ "Perfect! I've booked your [appointment type] for [date] at [time]."\n   ✓ "Great! Your appointment is confirmed for [date] at [time]."\n   ✓ "I've scheduled your [appointment type] for [date] at [time]."\n\n9. Error Response Format:\n   ✓ "I'm sorry, but [user-friendly error explanation]. Let me try again."\n   ✓ "I'm having trouble booking that time. Would you like to try a different time?"\n   ✓ "I'm unable to book the appointment right now. Please try again later."\n\n10. NEVER use these responses:\n    ❌ "The API returned an error..."\n    ❌ "Let me try booking that again..."\n    ❌ "The system is having issues..."\n    ❌ "There was a problem with the booking..."\n    ❌ Any technical error messages or API details`,
+                  dynamicParameters: [
+                    {
+                      name: "appointmentDetails",
+                      location: ParameterLocation.BODY,
+                      schema: {
+                        type: "object",
+                        properties: {
+                          appointmentType: {
+                            type: "string",
+                            enum: appointmentTypes.map(type => type.name.toLowerCase().replace(/\s+/g, '_')),
+                          },
+                          preferredDate: {
+                            type: "string",
+                            format: "YYYY-MM-DD",
+                          },
+                          preferredTime: {
+                            type: "string",
+                            pattern: "^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$",
+                          },
+                          firstName: {
+                            type: "string",
+                          },
+                          lastName: {
+                            type: "string",
+                          },
+                          email: {
+                            type: "string",
+                            format: "email",
+                          },
+                          timezone: {
+                            type: "string",
+                            description: "The caller's timezone in IANA format (e.g., 'America/New_York') or common format (e.g., 'EST', 'PST')",
+                          },
+                          notes: {
+                            type: "string",
+                          },
+                          appointmentDuration: {
+                            type: "string",
+                            description: "Duration of the appointment in minutes. Default durations by type: " + appointmentTypes.map(type => `${type.name.toLowerCase().replace(/\s+/g, '_')}: ${type.duration}`).join(', ') + ". Can be customized based on caller request.",
+                          },
+                        },
+                        required: [
+                          "appointmentType",
+                          "preferredDate",
+                          "preferredTime",
+                          "firstName",
+                          "lastName",
+                          "email",
+                          "timezone",
+                          "appointmentDuration",
+                        ],
+                      },
+                      required: true,
+                    },
+                  ],
+                  http: {
+                    baseUrlPattern: `https://app.magicteams.ai/api/bookAppointment`,
+                    httpMethod: "POST",
+                  },
+                  staticParameters: staticParameters
+                }
+              };
+        
+              console.log("✅ Successfully created appointment tool configuration");
+        
+              const rescheduleTool: SelectedTool = {
+                temporaryTool: {
+                  modelToolName: "rescheduleAppointment",
+                  description: "To reschedule an existing appointment, you need to get the eventId first. Use the lookup tool to confirm them and get the eventId first, then call this tool with the eventId, new date, and new time.",
+                  dynamicParameters: [
+                    {
+                      name: "eventId",
+                      location: ParameterLocation.BODY,
+                      schema: { type: "string", description: "The eventId of the appointment to reschedule, obtained from the lookup endpoint." },
+                      required: true
+                    },
+                    {
+                      name: "newDate",
+                      location: ParameterLocation.BODY,
+                      schema: { type: "string", format: "YYYY-MM-DD", description: "The new date for the appointment." },
+                      required: true
+                    },
+                    {
+                      name: "newTime",
+                      location: ParameterLocation.BODY,
+                      schema: { type: "string", pattern: "^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$", description: "The new time for the appointment." },
+                      required: true
+                    },
+                    {
+                      name: "timezone",
+                      location: ParameterLocation.BODY,
+                      schema: { type: "string", description: "The timezone for the new appointment time (IANA format, e.g., 'America/New_York')." },
+                      required: true
+                    }
+                  ],
+                  http: {
+                    baseUrlPattern: `https://app.magicteams.ai/api/appointments/reschedule`,
+                    httpMethod: "POST"
+                  },
+                  staticParameters: staticParameters,
+                }
+              };
+        
+              const cancelTool: SelectedTool = {
+                temporaryTool: {
+                  modelToolName: "cancelAppointment",
+                  description: "Cancel an existing appointment. Always ask for the user's name, email, the slot they booked (date, time, and timezone). Use the /api/appointments/lookup endpoint to get the eventId first, then call this tool with the eventId.",
+                  dynamicParameters: [
+                    {
+                      name: "eventId",
+                      location: ParameterLocation.BODY,
+                      schema: { type: "string", description: "The eventId of the appointment to cancel, obtained from the lookup endpoint." },
+                      required: true
+                    }
+                  ],
+                  http: {
+                    baseUrlPattern: `https://app.magicteams.ai/api/appointments/cancel`,
+                    httpMethod: "POST"
+                  },
+                  staticParameters: staticParameters
+                }
+              };
+        
+              const lookupTool: SelectedTool = {
+                temporaryTool: {
+                  modelToolName: "lookupAppointment",
+                  description: "Look up an existing appointment in Google Calendar. Always use this tool first to confirm the user's appointment details and obtain the eventId before attempting to cancel or reschedule. Provide the user's name, email, the slot they booked (date, time, and timezone), and their Google Calendar access token. remeber the present date is " + new Date().toDateString().split('T')[0] + " and the present time is " + new Date().toLocaleTimeString(),
+                  dynamicParameters: [
+                    {
+                      name: "name",
+                      location: ParameterLocation.BODY,
+                      schema: { type: "string", description: "The name used to book the appointment." },
+                      required: true
+                    },
+                    {
+                      name: "email",
+                      location: ParameterLocation.BODY,
+                      schema: { type: "string", format: "email", description: "The email used to book the appointment." },
+                      required: true
+                    },
+                    {
+                      name: "date",
+                      location: ParameterLocation.BODY,
+                      schema: { type: "string", format: "YYYY-MM-DD", description: "The appointment date." },
+                      required: true
+                    },
+                    {
+                      name: "time",
+                      location: ParameterLocation.BODY,
+                      schema: { type: "string", pattern: "^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$", description: "The appointment time." },
+                      required: true
+                    },
+                    {
+                      name: "timezone",
+                      location: ParameterLocation.BODY,
+                      schema: { type: "string", description: "The timezone the appointment was booked in (IANA format, e.g., 'America/New_York')." },
+                      required: true
+                    },
+                  ],
+                  http: {
+                    baseUrlPattern: `https://app.magicteams.ai/api/appointments/lookup`,
+                    httpMethod: "POST"
+                  },
+                  staticParameters: staticParameters
+                }
+              };
+
+              tools.push(bookingTool);
+              tools.push(rescheduleTool);
+              tools.push(cancelTool);
+              tools.push(lookupTool);
+
+              return tools;
+        }
+        catch(error){
+            console.error("Error configuring appointment tool:", error);
+            return [];
+        }
+    }
+
+    private async getUserCalendarAccount(userId: string, supabase: SupabaseClient): Promise<any[]> {
+        try{
+            const { data , error: errorUserCalendarAccount } = await supabase
+            .from('user_calendar_accounts')
+            .select('*')
+            .eq('user_id', userId);
+
+            if(!data || data.length === 0 || errorUserCalendarAccount){
+                throw new Error('Failed to fetch user calendar account');
+            }
+          
+            const account = data.find((account) => account.user_id === userId);
+
+            return account;
+
+        }
+        catch(error){
+            console.error("Error fetching user calendar account:", error);
+            return [];
+        }
+    }
+
+    private async getCallendarById(calendarId: string, supabase: SupabaseClient): Promise<any[]> {
+        try{
+            const { data, error: errorCalendar } = await supabase
+            .from('user_calendar_accounts')
+            .select('*')
+            .eq('id', calendarId);
+
+            if(!data || data.length === 0 || errorCalendar){
+                throw new Error('Failed to fetch calendar');
+            }
+
+            return data;
+        }
+        catch(error){
+            console.error("Error fetching calendar:", error);
+            return [];
+        }
+    }
+
+    private async getAppointmentTypes(appointmentTool: any): Promise<{appointmentTypes: {name: string, duration: number}[]}> {
+        try {
+            let appointmentTypes: {name: string, duration: number}[] = [];
+
+            if ((appointmentTool as any).appointment_types) {
+              // Handle string parsing if needed (depending on how it's stored)
+              if (typeof (appointmentTool as any).appointment_types === 'string') {
+                appointmentTypes = JSON.parse((appointmentTool as any).appointment_types);
+              } else {
+                appointmentTypes = (appointmentTool as any).appointment_types;
+              }
+              console.log(`Found ${appointmentTypes.length} appointment types in tool configuration`);
+              
+              return {appointmentTypes};
+
+            } else {
+              console.warn("No appointment types found in tool configuration, using defaults");
+              appointmentTypes = [
+                { name: "consultation", duration: 60 },
+                { name: "follow_up", duration: 30 },
+                { name: "general", duration: 45 }
+              ];
+
+              return {
+                appointmentTypes,
+              };
+            }
+          } catch (error) {
+            console.error("Error parsing appointment types:", error);
+            return {
+                appointmentTypes: [
+                    { name: "consultation", duration: 60 },
+                    { name: "follow_up", duration: 30 },
+                    { name: "general", duration: 45 }
+                  ],
+            };
+        }
+    }
+
+    private async configureKnowledgeBase(knowledgeBaseId: string, botId: string, userId: string, supabase: SupabaseClient): Promise<any[]> {
+        return [];
     }
 
     private async getUserIdFromAccountSid(accountSid: string): Promise<false | { user_id: string, account_name: string }> {

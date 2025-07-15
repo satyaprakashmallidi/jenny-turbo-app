@@ -954,8 +954,8 @@ export default {
               job_id: job_id
             };
 
-            console.log("Queue Processing Payload", payload);
-            const result = await twilioService.makeCall({ ...payload, supabase, env });
+            // console.log("Queue Processing Payload", payload);
+            const result = await twilioService.makeCall({ ...payload, supabase, env , configureBots: true});
             // Extract callId from result (if present)
             callId = result?.callId || null;
             ultravoxData = result;
