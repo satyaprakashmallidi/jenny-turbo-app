@@ -835,6 +835,8 @@ export class TwilioService {
                 error: any;
             }
 
+            const jenny_url = "https://dc60ae8873d6.ngrok-free.app";
+
             if(!appointmentData || appointmentData.length === 0 || errorAppointmentTool){
                 throw new Error('Failed to fetch appointment tool');
             }
@@ -848,7 +850,7 @@ export class TwilioService {
             //if calcom is true book the appointment using calcom else use the calendar account
             if(appointmentToolDetails.is_calcom) {
                 const {data:calcomData, error:errorCalcomData} = await supabase
-                .from('user_calcom_accounts')
+                .from('user_calcom_credentials')
                 .select('*')
                 .eq('user_id', userId) as {
                     data: {
@@ -856,6 +858,10 @@ export class TwilioService {
                     }[];
                     error: any;
                 };
+
+                console.log("calcomData: ", calcomData);
+                console.log("errorCalcomData: ", errorCalcomData);
+                console.log("userId: ", userId);
 
                 if(!calcomData || calcomData.length === 0 || errorCalcomData){
                     throw new Error('Failed to fetch calcom data');
@@ -913,7 +919,7 @@ export class TwilioService {
                               },
                               timezone: {
                                 type: "string",
-                                description: "The caller's timezone in IANA format (e.g., 'America/New_York') or common format (e.g., 'EST', 'PST')",
+                                description: "Please convert any user-specified timezone into a valid IANA timezone format. For example, if the user says 'IST', convert it to 'Asia/Kolkata'; for 'PST', use 'America/Los_Angeles'. Return only valid IANA timezones.",
                               },
                               notes: {
                                 type: "string",
@@ -938,7 +944,7 @@ export class TwilioService {
                         },
                       ],
                       http: {
-                        baseUrlPattern: `http://localhost:3000/api/calcom-appointments/book`,
+                        baseUrlPattern: `${jenny_url}/api/calcom-appointments/book`,
                         httpMethod: "POST",
                       },
                       staticParameters: staticParameters
@@ -978,7 +984,7 @@ export class TwilioService {
                         }
                       ],
                       http: {
-                        baseUrlPattern: `https://app.magicteams.ai/api/calcom/rescheduleAppointment`,
+                        baseUrlPattern: `${jenny_url}/api/calcom-appointments/reschedule`,
                         httpMethod: "POST"
                       },
                       staticParameters: staticParameters,
