@@ -835,7 +835,7 @@ export class TwilioService {
                 error: any;
             }
 
-            const jenny_url = "https://dc60ae8873d6.ngrok-free.app";
+            const jenny_url = "https://app.magicteams.ai";
 
             if(!appointmentData || appointmentData.length === 0 || errorAppointmentTool){
                 throw new Error('Failed to fetch appointment tool');
@@ -870,7 +870,7 @@ export class TwilioService {
                 const appointmentTypes = (await this.getAppointmentTypes(appointmentToolDetails)).appointmentTypes;
 
 
-                console.log("the appointment types for the calcom are "+appointmentTypes.map(type => `${type.title}: ${type.lengthInMinutes} minutes`).join('\n- '))
+                console.log("the appointment types for the calcom are "+appointmentTypes.map(type => `${type.name}: ${type.duration} minutes`).join('\n- '))
                 const staticParameters = [
                     {
                         name: "apiKey",
@@ -887,21 +887,22 @@ export class TwilioService {
                 const bookingTool: SelectedTool = {
                     temporaryTool:{
                       modelToolName: "bookAppointment",
-                      description: `The current date is ${new Date().toDateString().split('T')[0]} \n\nIMPORTANT: Our appointment types have specific default durations, but we can be flexible if needed.\n- ${appointmentTypes.map(type => `${type.title}: ${type.lengthInMinutes} minutes`).join('\n- ')}\n\nIf a caller specifically requests a different duration, you should accommodate their request when possible. Always confirm the appointment type AND duration with the caller before booking.\n\nCRITICAL RESPONSE VALIDATION INSTRUCTIONS:\n1. After calling bookAppointment, carefully check the response:\n   - Look for "success": true in the response\n   - Verify the response contains appointment details\n   - Check for any error messages\n   - Only proceed if the response indicates a successful booking\n\n2. For successful bookings (when response has success: true):\n   - Immediately confirm the booking to the user\n   - Share the appointment details (date, time, type)\n   - Do NOT mention any technical details or API responses\n   - Do NOT ask for additional confirmation\n   - Do NOT retry the booking\n\n3. For failed bookings:\n   - Check the specific error message\n   - Handle common errors (past date, timezone, etc.)\n   - Only retry if the error is recoverable\n   - After 2 failed attempts, suggest trying again later\n\n4. NEVER:\n   - Ignore a successful response\n   - Retry after a successful booking\n   - Show technical error messages to the user\n   - Ask for confirmation after a successful booking\n   - Mention API responses or technical details\n\n5. Example successful response handling:\n   If response is: { "success": true, "appointment": { ... } }\n   Say: "Perfect! I've booked your appointment for [date] at [time]."\n\n6. Example error handling:\n   If response has error: "Cannot book appointments in the past"\n   Say: "I'm sorry, but that date has already passed. Could you choose a future date?"\n\n7. Response Validation Steps:\n   a. Check success status first\n   b. If success is true, confirm booking immediately\n   c. If success is false, check error message\n   d. Handle error appropriately\n   e. Only retry if error is recoverable\n   f. After 2 failures, suggest trying again later\n\n8. Success Confirmation Format:\n   ✓ "Perfect! I've booked your [appointment type] for [date] at [time]."\n   ✓ "Great! Your appointment is confirmed for [date] at [time]."\n   ✓ "I've scheduled your [appointment type] for [date] at [time]."\n\n9. Error Response Format:\n   ✓ "I'm sorry, but [user-friendly error explanation]. Let me try again."\n   ✓ "I'm having trouble booking that time. Would you like to try a different time?"\n   ✓ "I'm unable to book the appointment right now. Please try again later."\n\n10. NEVER use these responses:\n    ❌ "The API returned an error..."\n    ❌ "Let me try booking that again..."\n    ❌ "The system is having issues..."\n    ❌ "There was a problem with the booking..."\n    ❌ Any technical error messages or API details`,
+                      description: `The current date is ${new Date().toDateString().split('T')[0]} \n\nIMPORTANT: Our appointment types have specific default durations.\n- ${appointmentTypes.map(type => `${type.name}: ${type.duration} minutes`).join('\n- ')}\n\nIf a caller specifically requests a different duration, ask them to choose one from exsitning durations. Always confirm the appointment type AND duration with the caller before booking.\n\nCRITICAL RESPONSE VALIDATION INSTRUCTIONS:\n1. After calling bookAppointment, carefully check the response:\n   - Look for "success": true in the response\n   - Verify the response contains appointment details\n   - Check for any error messages\n   - Only proceed if the response indicates a successful booking\n\n2. For successful bookings (when response has success: true):\n   - Immediately confirm the booking to the user\n   - Share the appointment details (date, time, type)\n   - Do NOT mention any technical details or API responses\n   - Do NOT ask for additional confirmation\n   - Do NOT retry the booking\n\n3. For failed bookings:\n   - Check the specific error message\n   - Handle common errors (past date, timezone, etc.)\n   - Only retry if the error is recoverable\n   - After 2 failed attempts, suggest trying again later\n\n4. NEVER:\n   - Ignore a successful response\n   - Retry after a successful booking\n   - Show technical error messages to the user\n   - Ask for confirmation after a successful booking\n   - Mention API responses or technical details\n\n5. Example successful response handling:\n   If response is: { "success": true, "appointment": { ... } }\n   Say: "Perfect! I've booked your appointment for [date] at [time]."\n\n6. Example error handling:\n   If response has error: "Cannot book appointments in the past"\n   Say: "I'm sorry, but that date has already passed. Could you choose a future date?"\n\n7. Response Validation Steps:\n   a. Check success status first\n   b. If success is true, confirm booking immediately\n   c. If success is false, check error message\n   d. Handle error appropriately\n   e. Only retry if error is recoverable\n   f. After 2 failures, suggest trying again later\n\n8. Success Confirmation Format:\n   ✓ "Perfect! I've booked your [appointment type] for [date] at [time]."\n   ✓ "Great! Your appointment is confirmed for [date] at [time]."\n   ✓ "I've scheduled your [appointment type] for [date] at [time]."\n\n9. Error Response Format:\n   ✓ "I'm sorry, but [user-friendly error explanation]. Let me try again."\n   ✓ "I'm having trouble booking that time. Would you like to try a different time?"\n   ✓ "I'm unable to book the appointment right now. Please try again later."\n\n10. NEVER use these responses:\n    ❌ "The API returned an error..."\n    ❌ "Let me try booking that again..."\n    ❌ "The system is having issues..."\n    ❌ "There was a problem with the booking..."\n    ❌ Any technical error messages or API details`,
                       dynamicParameters: [
                         {
                           name: "appointmentDetails",
-                          location: ParameterLocation.BODY,
+                          location: ParameterLocation.BODY, 
                           schema: {
                             type: "object",
                             properties: {
                               appointmentType: {
                                 type: "string",
-                                enum: appointmentTypes.map(type => type.title.toLowerCase().replace(/\s+/g, '_')),
+                                enum: appointmentTypes.map(type => type.name.toLowerCase().replace(/\s+/g, '_')),
                               },
                               preferredDate: {
                                 type: "string",
                                 format: "YYYY-MM-DD",
+                                description: `The current year is ${new Date().getFullYear()}. When a user provides a date without a year, you must infer the correct year. If the provided month and day are in the future relative to the current date, use the current year. If they have already passed, use the next year.`
                               },
                               preferredTime: {
                                 type: "string",
@@ -926,7 +927,7 @@ export class TwilioService {
                               },
                               appointmentDuration: {
                                 type: "string",
-                                description: "Duration of the appointment in minutes. Default durations by type: " + appointmentTypes.map(type => `${type.title.toLowerCase().replace(/\s+/g, '_')}: ${type.lengthInMinutes}`).join(', ') + ". Can be customized based on caller request.",
+                                description: "Duration of the appointment in minutes. Default durations by type: " + appointmentTypes.map(type => `${type.name.toLowerCase().replace(/\s+/g, '_')}: ${type.duration}`).join(', ') + ". ask them to choose one from this list",
                               },
                             },
                             required: [
@@ -950,115 +951,115 @@ export class TwilioService {
                       staticParameters: staticParameters
                     }
                   };
+                  
+                  console.log("✅Successfully created cal.com appointment tool configuration");
             
-                  console.log("✅ Successfully created cal.com appointment tool configuration");
+                //   const rescheduleTool: SelectedTool = {
+                //     temporaryTool: {
+                //       modelToolName: "rescheduleAppointment",
+                //       description: "To reschedule an existing appointment, you need to get the eventId first. Use the lookup tool to confirm them and get the eventId first, then call this tool with the eventId, new date, and new time.",
+                //       dynamicParameters: [
+                //         {
+                //           name: "eventId",
+                //           location: ParameterLocation.BODY,
+                //           schema: { type: "string", description: "The eventId of the appointment to reschedule, obtained from the lookup endpoint." },
+                //           required: true
+                //         },
+                //         {
+                //           name: "newDate",
+                //           location: ParameterLocation.BODY,
+                //           schema: { type: "string", format: "YYYY-MM-DD", description: "The new date for the appointment." },
+                //           required: true
+                //         },
+                //         {
+                //           name: "newTime",
+                //           location: ParameterLocation.BODY,
+                //           schema: { type: "string", pattern: "^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$", description: "The new time for the appointment." },
+                //           required: true
+                //         },
+                //         {
+                //           name: "timezone",
+                //           location: ParameterLocation.BODY,
+                //           schema: { type: "string", description: "The timezone for the new appointment time (IANA format, e.g., 'America/New_York')." },
+                //           required: true
+                //         }
+                //       ],
+                //       http: {
+                //         baseUrlPattern: `${jenny_url}/api/calcom-appointments/reschedule`,
+                //         httpMethod: "POST"
+                //       },
+                //       staticParameters: staticParameters,
+                //     }
+                //   };
             
-                  const rescheduleTool: SelectedTool = {
-                    temporaryTool: {
-                      modelToolName: "rescheduleAppointment",
-                      description: "To reschedule an existing appointment, you need to get the eventId first. Use the lookup tool to confirm them and get the eventId first, then call this tool with the eventId, new date, and new time.",
-                      dynamicParameters: [
-                        {
-                          name: "eventId",
-                          location: ParameterLocation.BODY,
-                          schema: { type: "string", description: "The eventId of the appointment to reschedule, obtained from the lookup endpoint." },
-                          required: true
-                        },
-                        {
-                          name: "newDate",
-                          location: ParameterLocation.BODY,
-                          schema: { type: "string", format: "YYYY-MM-DD", description: "The new date for the appointment." },
-                          required: true
-                        },
-                        {
-                          name: "newTime",
-                          location: ParameterLocation.BODY,
-                          schema: { type: "string", pattern: "^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$", description: "The new time for the appointment." },
-                          required: true
-                        },
-                        {
-                          name: "timezone",
-                          location: ParameterLocation.BODY,
-                          schema: { type: "string", description: "The timezone for the new appointment time (IANA format, e.g., 'America/New_York')." },
-                          required: true
-                        }
-                      ],
-                      http: {
-                        baseUrlPattern: `${jenny_url}/api/calcom-appointments/reschedule`,
-                        httpMethod: "POST"
-                      },
-                      staticParameters: staticParameters,
-                    }
-                  };
+                //   const cancelTool: SelectedTool = {
+                //     temporaryTool: {
+                //       modelToolName: "cancelAppointment",
+                //       description: "Cancel an existing appointment. Always ask for the user's name, email, the slot they booked (date, time, and timezone). Use the /api/appointments/lookup endpoint to get the eventId first, then call this tool with the eventId.",
+                //       dynamicParameters: [
+                //         {
+                //           name: "eventId",
+                //           location: ParameterLocation.BODY,
+                //           schema: { type: "string", description: "The eventId of the appointment to cancel, obtained from the lookup endpoint." },
+                //           required: true
+                //         }
+                //       ],
+                //       http: {
+                //         baseUrlPattern: `https://app.magicteams.ai/api/calcom/cancelAppointment`,
+                //         httpMethod: "POST"
+                //       },
+                //       staticParameters: staticParameters
+                //     }
+                //   };
             
-                  const cancelTool: SelectedTool = {
-                    temporaryTool: {
-                      modelToolName: "cancelAppointment",
-                      description: "Cancel an existing appointment. Always ask for the user's name, email, the slot they booked (date, time, and timezone). Use the /api/appointments/lookup endpoint to get the eventId first, then call this tool with the eventId.",
-                      dynamicParameters: [
-                        {
-                          name: "eventId",
-                          location: ParameterLocation.BODY,
-                          schema: { type: "string", description: "The eventId of the appointment to cancel, obtained from the lookup endpoint." },
-                          required: true
-                        }
-                      ],
-                      http: {
-                        baseUrlPattern: `https://app.magicteams.ai/api/calcom/cancelAppointment`,
-                        httpMethod: "POST"
-                      },
-                      staticParameters: staticParameters
-                    }
-                  };
-            
-                  const lookupTool: SelectedTool = {
-                    temporaryTool: {
-                      modelToolName: "lookupAppointment",
-                      description: "Look up an existing appointment in Cal.com. Always use this tool first to confirm the user's appointment details and obtain the eventId before attempting to cancel or reschedule. Provide the user's name, email, the slot they booked (date, time, and timezone). remeber the present date is " + new Date().toDateString().split('T')[0] + " and the present time is " + new Date().toLocaleTimeString(),
-                      dynamicParameters: [
-                        {
-                          name: "name",
-                          location: ParameterLocation.BODY,
-                          schema: { type: "string", description: "The name used to book the appointment." },
-                          required: true
-                        },
-                        {
-                          name: "email",
-                          location: ParameterLocation.BODY,
-                          schema: { type: "string", format: "email", description: "The email used to book the appointment." },
-                          required: true
-                        },
-                        {
-                          name: "date",
-                          location: ParameterLocation.BODY,
-                          schema: { type: "string", format: "YYYY-MM-DD", description: "The appointment date." },
-                          required: true
-                        },
-                        {
-                          name: "time",
-                          location: ParameterLocation.BODY,
-                          schema: { type: "string", pattern: "^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$", description: "The appointment time." },
-                          required: true
-                        },
-                        {
-                          name: "timezone",
-                          location: ParameterLocation.BODY,
-                          schema: { type: "string", description: "The timezone the appointment was booked in (IANA format, e.g., 'America/New_York')." },
-                          required: true
-                        },
-                      ],
-                      http: {
-                        baseUrlPattern: `https://app.magicteams.ai/api/calcom/lookupAppointment`,
-                        httpMethod: "POST"
-                      },
-                      staticParameters: staticParameters
-                    }
-                  };
+                //   const lookupTool: SelectedTool = {
+                //     temporaryTool: {
+                //       modelToolName: "lookupAppointment",
+                //       description: "Look up an existing appointment in Cal.com. Always use this tool first to confirm the user's appointment details and obtain the eventId before attempting to cancel or reschedule. Provide the user's name, email, the slot they booked (date, time, and timezone). remeber the present date is " + new Date().toDateString().split('T')[0] + " and the present time is " + new Date().toLocaleTimeString(),
+                //       dynamicParameters: [
+                //         {
+                //           name: "name",
+                //           location: ParameterLocation.BODY,
+                //           schema: { type: "string", description: "The name used to book the appointment." },
+                //           required: true
+                //         },
+                //         {
+                //           name: "email",
+                //           location: ParameterLocation.BODY,
+                //           schema: { type: "string", format: "email", description: "The email used to book the appointment." },
+                //           required: true
+                //         },
+                //         {
+                //           name: "date",
+                //           location: ParameterLocation.BODY,
+                //           schema: { type: "string", format: "YYYY-MM-DD", description: "The appointment date." },
+                //           required: true
+                //         },
+                //         {
+                //           name: "time",
+                //           location: ParameterLocation.BODY,
+                //           schema: { type: "string", pattern: "^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$", description: "The appointment time." },
+                //           required: true
+                //         },
+                //         {
+                //           name: "timezone",
+                //           location: ParameterLocation.BODY,
+                //           schema: { type: "string", description: "The timezone the appointment was booked in (IANA format, e.g., 'America/New_York')." },
+                //           required: true
+                //         },
+                //       ],
+                //       http: {
+                //         baseUrlPattern: `https://app.magicteams.ai/api/calcom/lookupAppointment`,
+                //         httpMethod: "POST"
+                //       },
+                //       staticParameters: staticParameters
+                //     }
+                //   };
     
                   tools.push(bookingTool);
-                  tools.push(rescheduleTool);
-                  tools.push(cancelTool);
-                  tools.push(lookupTool);
+                //   tools.push(rescheduleTool);
+                //   tools.push(cancelTool);
+                //   tools.push(lookupTool);
     
                   return tools;
 
