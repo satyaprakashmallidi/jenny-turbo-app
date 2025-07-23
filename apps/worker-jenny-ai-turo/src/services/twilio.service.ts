@@ -898,6 +898,7 @@ export class TwilioService {
                               appointmentType: {
                                 type: "string",
                                 enum: appointmentTypes.map(type => type.name.toLowerCase().replace(/\s+/g, '_')),
+                                description: "The appointment type the user wants to book. Please choose one from the following list: " + appointmentTypes.map(type => `${type.name.toLowerCase().replace(/\s+/g, '_')}: ${type.duration} minutes`).join(', ') + ". ask them to choose one from this list",
                               },
                               preferredDate: {
                                 type: "string",
