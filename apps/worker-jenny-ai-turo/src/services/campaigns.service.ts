@@ -65,6 +65,18 @@ export class CampaignsService {
         .eq('campaign_id', campaign_id)
         .eq('call_status', 'pending');
 
+      console.log("📋 Contacts found for queueing:", {
+        campaign_id,
+        total_contacts_in_campaign: campaignData.total_contacts,
+        pending_contacts_found: contactsData?.length || 0,
+        contact_details: contactsData?.map(c => ({
+          contact_id: c.contact_id,
+          contact_phone: c.contact_phone,
+          contact_name: c.contact_name,
+          call_status: c.call_status
+        })) || []
+      });
+
       if (contactsError) {
         return { success: false, message: 'Failed to fetch contacts', error: contactsError.message };
       }
@@ -75,9 +87,18 @@ export class CampaignsService {
 
       // Queue calls for each contact
       let queuedCount = 0;
+      console.log(`🔄 Starting to process ${contactsData.length} contacts for queueing...`);
+      
       for (const contact of contactsData) {
         try {
+          console.log(`📞 Processing contact ${queuedCount + 1}/${contactsData.length}:`, {
+            contact_id: contact.contact_id,
+            contact_phone: contact.contact_phone,
+            contact_name: contact.contact_name
+          });
+          
           const job_id = randomUUID();
+          console.log(`🆔 Generated job_id: ${job_id}`);
           
           // Create call job record
           const { error: jobError } = await this.db
@@ -109,12 +130,13 @@ export class CampaignsService {
            
 
           if (jobError) {
-            console.error('Failed to create job for contact:', contact.contact_id, jobError);
+            console.error('❌ Failed to create job for contact:', contact.contact_id, jobError);
             continue;
           }
+          console.log(`✅ Successfully created job record for contact: ${contact.contact_id}`);
 
           // Update contact status to queued
-          await this.db
+          const { error: updateError } = await this.db
             .from('call_campaign_contacts')
             .update({
               call_status: 'queued',
@@ -122,6 +144,12 @@ export class CampaignsService {
               queued_at: new Date().toISOString()
             })
             .eq('contact_id', contact.contact_id);
+
+          if (updateError) {
+            console.error('❌ Failed to update contact status to queued:', contact.contact_id, updateError);
+            continue;
+          }
+          console.log(`✅ Updated contact status to 'queued' for: ${contact.contact_id}`);
 
           // Queue the job (if queue is available)
           if (this.env.calls_que) {
@@ -186,11 +214,15 @@ export class CampaignsService {
                 campaign_settings: campaignData.campaign_settings
               }
             });
+            console.log(`🚀 Successfully sent job to queue: ${job_id} for contact: ${contact.contact_phone}`);
+          } else {
+            console.error('❌ Queue not available (calls_que is null)');
           }
 
           queuedCount++;
+          console.log(`✅ Contact ${queuedCount}/${contactsData.length} completed successfully`);
         } catch (error) {
-          console.error('Error queueing contact:', contact.contact_id, error);
+          console.error('❌ Error queueing contact:', contact.contact_id, error);
         }
       }
 
