@@ -800,13 +800,7 @@ export class TwilioService {
             console.log("TimeTaken: ", TimeTaken);
 
 
-            if(callConfig.endReason === 'unjoined') {
-                console.log("Call ended with reason 'unjoined'");
-                await this.deleteCallData(callId);
-                return;
-            }
-
-            // Get call data from KV
+            // Get call data from KV FIRST (before checking unjoined)
             const call = await this.getCallData(callId);
             if (!call) {
                 console.error("Call not found:", callId);
@@ -819,6 +813,7 @@ export class TwilioService {
 
             console.log("🔍 Retrieved call data for unlock check:", {
                 callId,
+                endReason: callConfig.endReason,
                 numberLockingEnabled: call.numberLockingEnabled,
                 twilioFromNumber: call.twilioData?.from_phone_number,
                 hasEnv: !!this.env
@@ -826,17 +821,28 @@ export class TwilioService {
 
             const { twilioData: { user_id: userId, from_phone_number: twilioFromNumber, to_number: toNumber }, numberLockingEnabled } = call;
 
-            // Unlock the Twilio FROM number if locking was enabled
+            // ALWAYS unlock the Twilio FROM number if locking was enabled (regardless of end reason)
             if (numberLockingEnabled && twilioFromNumber && this.env) {
                 const twilioLockKey = `locked_twilio:${twilioFromNumber}`;
                 try {
                     await this.env.ACTIVE_CALLS.delete(twilioLockKey);
-                    console.log(`✅ Successfully unlocked Twilio FROM number: ${twilioFromNumber}`);
+                    console.log(`✅ Successfully unlocked Twilio FROM number: ${twilioFromNumber} (EndReason: ${callConfig.endReason})`);
                 } catch (error) {
                     console.error(`❌ Error unlocking Twilio FROM number:`, error);
                 }
             } else {
                 console.log(`⚠️  Skipping unlock - numberLockingEnabled: ${numberLockingEnabled}, twilioFromNumber: ${twilioFromNumber}, hasEnv: ${!!this.env}`);
+            }
+
+            // Handle unjoined calls AFTER unlocking
+            if(callConfig.endReason === 'unjoined') {
+                console.log("Call ended with reason 'unjoined' - number has been unlocked");
+                await this.deleteCallData(callId);
+                return{
+                    userId,
+                    TimeTaken: 0, // No actual call time for unjoined
+                    callId
+                };
             }
 
             // Clean up call data
