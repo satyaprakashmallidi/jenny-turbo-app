@@ -923,6 +923,10 @@ export default {
     for (const msg of batch.messages) {
       const { job_id, payload } = msg.body;
       
+      console.log(`Processing queue message for job_id: ${job_id}, contact: ${payload.contact_phone || payload.toNumber}`);
+      console.log(`Campaign settings:`, payload.campaign_settings);
+      console.log(`Twilio numbers available:`, payload.twilio_phone_numbers);
+      
       // Properly initialize Supabase client for queue context
       const processedEnv = getEnv(env);
       const supabase = getSupabaseClient(processedEnv);
@@ -978,6 +982,7 @@ export default {
               await supabase.from('call_jobs').upsert({ 
                 job_id, 
                 status: 'pending', 
+                error_message: `Waiting for Ultravox capacity - ${new Date().toISOString()}`,
                 updated_at: new Date().toISOString() 
               }, { onConflict: 'job_id' });
               
@@ -986,25 +991,28 @@ export default {
                 await supabase
                   .from('call_campaign_contacts')
                   .update({
-                    call_status: 'queued'
+                    call_status: 'queued',
+                    error_message: `Waiting for Ultravox capacity - ${new Date().toISOString()}`
                   })
                   .eq('contact_id', payload.contact_id);
               }
               
-              await msg.retry({
+              msg.retry({
                 delaySeconds: 60
               });
               return; // Exit current processing attempt, message will be retried later
             }
             
-            // If Twilio number is busy, retry after 60s
+            // If Twilio number is busy, retry after 15s for faster processing
             if (errorMessage.includes('TWILIO_BUSY:')) {
-              console.log(`Twilio number busy, retrying in 60 seconds: ${errorMessage}`);
+              console.log(`Twilio number busy, retrying in 15 seconds: ${errorMessage}`);
+              console.log(`Job ID: ${job_id}, Contact: ${payload.contact_phone || payload.toNumber}`);
               
               // Reset job status back to pending for retry
               await supabase.from('call_jobs').upsert({ 
                 job_id, 
                 status: 'pending', 
+                error_message: `Waiting for available Twilio number - ${new Date().toISOString()}`,
                 updated_at: new Date().toISOString() 
               }, { onConflict: 'job_id' });
               
@@ -1013,13 +1021,14 @@ export default {
                 await supabase
                   .from('call_campaign_contacts')
                   .update({
-                    call_status: 'queued'
+                    call_status: 'queued',
+                    error_message: `Waiting for available Twilio number - ${new Date().toISOString()}`
                   })
                   .eq('contact_id', payload.contact_id);
               }
               
-              await msg.retry({
-                delaySeconds: 60
+              msg.retry({
+                delaySeconds: 15
               });
               return; // Exit current processing attempt, message will be retried later
             }

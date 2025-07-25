@@ -177,6 +177,7 @@ export class CampaignsService {
                 userId: campaignData.user_id,
                 tools: callConfig.selectedTools,
                 twilioFromNumber: campaignData.twilio_phone_number,
+                twilio_phone_numbers: campaignData.twilio_phone_numbers, // Add array of numbers
                 toNumber: contact.contact_phone,
                 customerName: contact.contact_name || 'Customer',
                 // Campaign-specific data for tracking
