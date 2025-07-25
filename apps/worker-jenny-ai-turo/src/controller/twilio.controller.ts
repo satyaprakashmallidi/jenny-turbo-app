@@ -41,7 +41,8 @@ export async function makeCall(c: Context) {
       placeholders,
       tools,
       transfer_to: transferTo,
-      is_single_twilio_account: isSingleTwilioAccount
+      is_single_twilio_account: isSingleTwilioAccount,
+      enable_number_locking: enableNumberLocking
     } = body;
 
     console.log("Body", body);
@@ -69,11 +70,13 @@ export async function makeCall(c: Context) {
       twilioFromNumber,
       userId,
       placeholders,
-      tools,
+      tools: [],
       supabase: c.req.db,
       env: c.req.env,
       transferTo,
-      isSingleTwilioAccount
+      isSingleTwilioAccount,
+      configureBots: true,
+      enableNumberLocking
     });
 
     return c.json({

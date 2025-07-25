@@ -15,13 +15,15 @@ export async function createCampaign(c: Context) {
       bot_id,
       bot_name,
       twilio_phone_number,
+      twilio_phone_numbers,
       system_prompt,
       voice_settings,
       field_mappings,
       contacts,
       notes,
       user_id,
-      scheduling
+      scheduling,
+      campaign_settings
     } = payload;
 
     if (!campaign_name || !bot_id || !contacts || !Array.isArray(contacts)) {
@@ -42,12 +44,14 @@ export async function createCampaign(c: Context) {
       bot_id,
       bot_name,
       twilio_phone_number,
+      twilio_phone_numbers: twilio_phone_numbers || [twilio_phone_number], // Store array of numbers
       system_prompt,
       voice_settings,
       field_mappings,
       total_contacts: contacts.length,
       notes,
-      status: 'pending'
+      status: 'pending',
+      campaign_settings: campaign_settings || {}
     };
 
     // Add scheduling fields if provided

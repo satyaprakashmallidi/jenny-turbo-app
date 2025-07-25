@@ -954,43 +954,63 @@ export default {
               job_id: job_id
             };
 
-            // console.log("Queue Processing Payload", payload);
-            const result = await twilioService.makeCall({ ...payload, supabase, env , configureBots: true});
+            console.log("i am anrasimha ", payload.campaign_settings?.enableNumberLocking);
+                       // console.log("Queue Processing Payload", payload);
+            const result = await twilioService.makeCall({ 
+              ...payload, 
+              supabase, 
+              env, 
+              configureBots: true,
+              enableNumberLocking: payload.campaign_settings?.enableNumberLocking || false,
+              twilioFromNumbers: payload.twilio_phone_numbers // Pass array of numbers for round-robin
+            });
             // Extract callId from result (if present)
             callId = result?.callId || null;
             ultravoxData = result;
             break; // Success, exit retry loop
           } catch (error) {
             console.log("Queue Processing Error", error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            
             // If Ultravox returns 429, retry after 60s
-            if (error instanceof Error && error.message && error.message.toLowerCase().includes('concurency limit')) {
+            if (errorMessage.toLowerCase().includes('concurency limit')) {
               await msg.retry({
                 delaySeconds: 60
-              })
+              });
               continue;
-            } else {
-              // Other error, mark as failed
-              await supabase.from('call_jobs').upsert({ 
-                job_id, 
-                status: 'failed', 
-                error_message: error instanceof Error ? error.message : String(error), 
-                updated_at: new Date().toISOString(), 
-                processed_at: new Date().toISOString() 
-              }, { onConflict: 'job_id' });
-
-              // Update campaign contact status if this is a campaign call
-              if (payload.campaign_id && payload.contact_id) {
-                await supabase
-                  .from('call_campaign_contacts')
-                  .update({
-                    call_status: 'failed',
-                    error_message: error instanceof Error ? error.message : String(error),
-                    completed_at: new Date().toISOString()
-                  })
-                  .eq('contact_id', payload.contact_id);
-              }
-              return;
             }
+            
+            // If Twilio number is busy, retry after 30s
+            if (errorMessage.includes('TWILIO_BUSY:')) {
+              console.log(`Twilio number busy, retrying in 60 seconds: ${errorMessage}`);
+              await msg.retry({
+                delaySeconds: 60
+              });
+              continue;
+            }
+            
+            
+            // Other error, mark as failed
+            await supabase.from('call_jobs').upsert({ 
+              job_id, 
+              status: 'failed', 
+              error_message: errorMessage, 
+              updated_at: new Date().toISOString(), 
+              processed_at: new Date().toISOString() 
+            }, { onConflict: 'job_id' });
+
+            // Update campaign contact status if this is a campaign call
+            if (payload.campaign_id && payload.contact_id) {
+              await supabase
+                .from('call_campaign_contacts')
+                .update({
+                  call_status: 'failed',
+                  error_message: errorMessage,
+                  completed_at: new Date().toISOString()
+                })
+                .eq('contact_id', payload.contact_id);
+            }
+            return;
           }
         }
         // Success: update job with callId

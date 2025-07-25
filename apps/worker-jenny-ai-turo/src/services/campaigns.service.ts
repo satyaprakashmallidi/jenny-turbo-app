@@ -10,10 +10,14 @@ export interface BulkCallPayload {
   bot_id: string;
   bot_name?: string;
   twilio_phone_number: string;
+  twilio_phone_numbers?: string[]; // Array of available numbers
   system_prompt: string;
   voice_settings?: any;
   field_mappings?: any;
   user_id: string;
+  campaign_settings?: {
+    enableNumberLocking?: boolean;
+  };
 }
 
 export class CampaignsService {
@@ -50,6 +54,9 @@ export class CampaignsService {
       if (campaignError || !campaignData) {
         return { success: false, message: 'Campaign not found', error: campaignError?.message };
       }
+
+      console.log("camamamam data", campaignData);
+
 
       // Get pending contacts
       const { data: contactsData, error: contactsError } = await this.db
@@ -90,12 +97,16 @@ export class CampaignsService {
                 bot_id: campaignData.bot_id,
                 bot_name: campaignData.bot_name,
                 twilio_phone_number: campaignData.twilio_phone_number,
+                twilio_phone_numbers: campaignData.twilio_phone_numbers, // Include array of numbers
                 system_prompt: campaignData.system_prompt,
                 voice_settings: campaignData.voice_settings,
                 field_mappings: campaignData.field_mappings,
-                user_id: campaignData.user_id
+                user_id: campaignData.user_id,
+                campaign_settings: campaignData.campaign_settings || {}
               }
             }]);
+
+           
 
           if (jobError) {
             console.error('Failed to create job for contact:', contact.contact_id, jobError);
@@ -170,7 +181,8 @@ export class CampaignsService {
                 customerName: contact.contact_name || 'Customer',
                 // Campaign-specific data for tracking
                 campaign_id,
-                contact_id: contact.contact_id
+                contact_id: contact.contact_id,
+                campaign_settings: campaignData.campaign_settings
               }
             });
           }
