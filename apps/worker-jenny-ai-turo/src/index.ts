@@ -977,16 +977,16 @@ export default {
               await msg.retry({
                 delaySeconds: 60
               });
-              continue;
+              return; // Exit current processing attempt, message will be retried later
             }
             
-            // If Twilio number is busy, retry after 30s
+            // If Twilio number is busy, retry after 60s
             if (errorMessage.includes('TWILIO_BUSY:')) {
               console.log(`Twilio number busy, retrying in 60 seconds: ${errorMessage}`);
               await msg.retry({
                 delaySeconds: 60
               });
-              continue;
+              return; // Exit current processing attempt, message will be retried later
             }
             
             
