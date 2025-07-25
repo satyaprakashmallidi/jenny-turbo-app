@@ -817,6 +817,13 @@ export class TwilioService {
                 };
             }
 
+            console.log("🔍 Retrieved call data for unlock check:", {
+                callId,
+                numberLockingEnabled: call.numberLockingEnabled,
+                twilioFromNumber: call.twilioData?.from_phone_number,
+                hasEnv: !!this.env
+            });
+
             const { twilioData: { user_id: userId, from_phone_number: twilioFromNumber, to_number: toNumber }, numberLockingEnabled } = call;
 
             // Unlock the Twilio FROM number if locking was enabled
@@ -824,10 +831,12 @@ export class TwilioService {
                 const twilioLockKey = `locked_twilio:${twilioFromNumber}`;
                 try {
                     await this.env.ACTIVE_CALLS.delete(twilioLockKey);
-                    console.log(`Unlocked Twilio FROM number: ${twilioFromNumber}`);
+                    console.log(`✅ Successfully unlocked Twilio FROM number: ${twilioFromNumber}`);
                 } catch (error) {
-                    console.error(`Error unlocking Twilio FROM number:`, error);
+                    console.error(`❌ Error unlocking Twilio FROM number:`, error);
                 }
+            } else {
+                console.log(`⚠️  Skipping unlock - numberLockingEnabled: ${numberLockingEnabled}, twilioFromNumber: ${twilioFromNumber}, hasEnv: ${!!this.env}`);
             }
 
             // Clean up call data

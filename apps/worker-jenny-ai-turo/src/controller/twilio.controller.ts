@@ -197,6 +197,7 @@ export async function finishCall(c: Context) {
     // Create a promise that resolves when the operation is complete
     if(call && call.endReason !== 'unjoined'){
       try {
+        console.log(`🔚 Call ending - CallID: ${call.callId}, EndReason: ${call.endReason}`);
         const response = await twilioService.finishCall({...body , supabaseClient : c.req.db});
         console.log("Background finishCall completed successfully" , response);
         
