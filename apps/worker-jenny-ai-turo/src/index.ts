@@ -974,6 +974,23 @@ export default {
             
             // If Ultravox returns 429, retry after 60s
             if (errorMessage.toLowerCase().includes('concurency limit')) {
+              // Reset job status back to pending for retry
+              await supabase.from('call_jobs').upsert({ 
+                job_id, 
+                status: 'pending', 
+                updated_at: new Date().toISOString() 
+              }, { onConflict: 'job_id' });
+              
+              // Reset campaign contact status if this is a campaign call
+              if (payload.campaign_id && payload.contact_id) {
+                await supabase
+                  .from('call_campaign_contacts')
+                  .update({
+                    call_status: 'queued'
+                  })
+                  .eq('contact_id', payload.contact_id);
+              }
+              
               await msg.retry({
                 delaySeconds: 60
               });
@@ -983,6 +1000,24 @@ export default {
             // If Twilio number is busy, retry after 60s
             if (errorMessage.includes('TWILIO_BUSY:')) {
               console.log(`Twilio number busy, retrying in 60 seconds: ${errorMessage}`);
+              
+              // Reset job status back to pending for retry
+              await supabase.from('call_jobs').upsert({ 
+                job_id, 
+                status: 'pending', 
+                updated_at: new Date().toISOString() 
+              }, { onConflict: 'job_id' });
+              
+              // Reset campaign contact status if this is a campaign call
+              if (payload.campaign_id && payload.contact_id) {
+                await supabase
+                  .from('call_campaign_contacts')
+                  .update({
+                    call_status: 'queued'
+                  })
+                  .eq('contact_id', payload.contact_id);
+              }
+              
               await msg.retry({
                 delaySeconds: 60
               });
