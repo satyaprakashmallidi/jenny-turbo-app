@@ -734,6 +734,90 @@ app.post('/api/sendSummary', async (c) => {
   }
 });
 
+app.post('/api/unlock-twilio-number', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { twilio_number } = body;
+    
+    if (!twilio_number) {
+      return c.json({
+        status: 'error',
+        message: 'Missing twilio_number parameter'
+      }, 400);
+    }
+
+    const twilioLockKey = `locked_twilio:${twilio_number}`;
+    
+    try {
+      // Check if the number is currently locked
+      const isLocked = await c.req.env.ACTIVE_CALLS.get(twilioLockKey);
+      
+      if (isLocked) {
+        await c.req.env.ACTIVE_CALLS.delete(twilioLockKey);
+        console.log(`🔓 Manually unlocked Twilio number: ${twilio_number}`);
+        
+        return c.json({
+          status: 'success',
+          message: `Successfully unlocked Twilio number: ${twilio_number}`,
+          was_locked: true
+        });
+      } else {
+        console.log(`ℹ️  Twilio number was not locked: ${twilio_number}`);
+        
+        return c.json({
+          status: 'success',
+          message: `Twilio number was not locked: ${twilio_number}`,
+          was_locked: false
+        });
+      }
+    } catch (error) {
+      console.error(`❌ Error unlocking Twilio number:`, error);
+      return c.json({
+        status: 'error',
+        message: 'Failed to unlock Twilio number',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }, 500);
+    }
+  } catch (error) {
+    console.error('Unlock Twilio Number Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+app.get('/api/check-twilio-lock', async (c) => {
+  try {
+    const twilio_number = c.req.query('twilio_number');
+    
+    if (!twilio_number) {
+      return c.json({
+        status: 'error',
+        message: 'Missing twilio_number parameter'
+      }, 400);
+    }
+
+    const twilioLockKey = `locked_twilio:${twilio_number}`;
+    const isLocked = await c.req.env.ACTIVE_CALLS.get(twilioLockKey);
+    
+    return c.json({
+      status: 'success',
+      twilio_number,
+      is_locked: !!isLocked,
+      lock_key: twilioLockKey
+    });
+  } catch (error) {
+    console.error('Check Twilio Lock Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
 app.get('/api/getSummary', async (c) => {
   try {
     const callId = c.req.query('call_id');
