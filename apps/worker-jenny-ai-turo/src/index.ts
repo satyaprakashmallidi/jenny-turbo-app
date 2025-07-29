@@ -429,6 +429,90 @@ app.route('/api/call-transcripts', callTranscriptsRoutes);
 
 app.post('/api/finish-call', finishCall);
 
+// Lock management endpoints for debugging
+app.get('/api/check-lock', async (c) => {
+  try {
+    const number = c.req.query('number');
+    if (!number) {
+      return c.json({ status: 'error', message: 'Missing number parameter' }, 400);
+    }
+    
+    // Normalize number for locking key
+    const normalizedNumber = number.replaceAll("+", "").replaceAll(" ", "").replaceAll("-", "");
+    const lockKey = `locked_twilio:${normalizedNumber}`;
+    
+    const lockValue = await c.req.env.ACTIVE_CALLS.get(lockKey);
+    
+    return c.json({
+      status: 'success',
+      number: number,
+      normalized_number: normalizedNumber,
+      lock_key: lockKey,
+      is_locked: !!lockValue,
+      lock_value: lockValue,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Check Lock Error:', error);
+    return c.json({ status: 'error', message: 'Failed to check lock', error: error instanceof Error ? error.message : error }, 500);
+  }
+});
+
+app.post('/api/remove-lock', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { number } = body;
+    
+    if (!number) {
+      return c.json({ status: 'error', message: 'Missing number parameter' }, 400);
+    }
+    
+    // Normalize number for locking key
+    const normalizedNumber = number.replaceAll("+", "").replaceAll(" ", "").replaceAll("-", "");
+    const lockKey = `locked_twilio:${normalizedNumber}`;
+    
+    // Check if lock exists before removing
+    const lockValue = await c.req.env.ACTIVE_CALLS.get(lockKey);
+    
+    if (lockValue) {
+      await c.req.env.ACTIVE_CALLS.delete(lockKey);
+      console.log(`🔓 Manually removed lock for number: ${normalizedNumber}`);
+    }
+    
+    return c.json({
+      status: 'success',
+      message: lockValue ? 'Lock removed successfully' : 'No lock found',
+      number: number,
+      normalized_number: normalizedNumber,
+      was_locked: !!lockValue,
+      previous_lock_value: lockValue,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Remove Lock Error:', error);
+    return c.json({ status: 'error', message: 'Failed to remove lock', error: error instanceof Error ? error.message : error }, 500);
+  }
+});
+
+app.get('/api/list-locks', async (c) => {
+  try {
+    // Get all keys with the lock prefix (this is a limitation - KV doesn't support listing by prefix easily)
+    // For now, we'll return a simple response indicating the endpoint exists
+    return c.json({
+      status: 'success',
+      message: 'Use check-lock endpoint with specific number to check individual locks',
+      endpoints: {
+        check_lock: '/api/check-lock?number=+1234567890',
+        remove_lock: '/api/remove-lock (POST with {"number": "+1234567890"})'
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('List Locks Error:', error);
+    return c.json({ status: 'error', message: 'Failed to list locks', error: error instanceof Error ? error.message : error }, 500);
+  }
+});
+
 app.get('/api/get-call-details' , async (c) => {
   try {
     const callId = c.req.query('call_id');
@@ -750,16 +834,17 @@ app.post('/api/unlock-twilio-number', async (c) => {
     
     try {
       // Check if the number is currently locked
-      const isLocked = await c.req.env.ACTIVE_CALLS.get(twilioLockKey);
+      const lockValue = await c.req.env.ACTIVE_CALLS.get(twilioLockKey);
       
-      if (isLocked) {
+      if (lockValue) {
         await c.req.env.ACTIVE_CALLS.delete(twilioLockKey);
         console.log(`🔓 Manually unlocked Twilio number: ${twilio_number}`);
         
         return c.json({
           status: 'success',
           message: `Successfully unlocked Twilio number: ${twilio_number}`,
-          was_locked: true
+          was_locked: true,
+          lock_value: lockValue
         });
       } else {
         console.log(`ℹ️  Twilio number was not locked: ${twilio_number}`);
@@ -788,6 +873,156 @@ app.post('/api/unlock-twilio-number', async (c) => {
   }
 });
 
+app.get('/api/twilio-lock-status/:number', async (c) => {
+  try {
+    const twilio_number = c.req.param('number');
+    
+    if (!twilio_number) {
+      return c.json({
+        status: 'error',
+        message: 'Missing twilio number in URL path'
+      }, 400);
+    }
+
+    const twilioLockKey = `locked_twilio:${twilio_number}`;
+    const lockValue = await c.req.env.ACTIVE_CALLS.get(twilioLockKey);
+    
+    return c.json({
+      status: 'success',
+      twilio_number,
+      is_locked: !!lockValue,
+      lock_key: twilioLockKey,
+      lock_value: lockValue,
+      locked_at: lockValue ? new Date().toISOString() : null
+    });
+  } catch (error) {
+    console.error('Check Twilio Lock Status Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+app.delete('/api/twilio-lock/:number', async (c) => {
+  try {
+    const twilio_number = c.req.param('number');
+    
+    if (!twilio_number) {
+      return c.json({
+        status: 'error',
+        message: 'Missing twilio number in URL path'
+      }, 400);
+    }
+
+    const twilioLockKey = `locked_twilio:${twilio_number}`;
+    
+    try {
+      // Get current lock value before deleting
+      const lockValue = await c.req.env.ACTIVE_CALLS.get(twilioLockKey);
+      
+      // Always try to delete (won't error if key doesn't exist)
+      await c.req.env.ACTIVE_CALLS.delete(twilioLockKey);
+      
+      console.log(`🔓 Deleted lock for Twilio number: ${twilio_number}`);
+      
+      return c.json({
+        status: 'success',
+        message: `Lock removed for Twilio number: ${twilio_number}`,
+        twilio_number,
+        was_locked: !!lockValue,
+        previous_lock_value: lockValue
+      });
+    } catch (error) {
+      console.error(`❌ Error removing lock for Twilio number ${twilio_number}:`, error);
+      return c.json({
+        status: 'error',
+        message: 'Failed to remove lock',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }, 500);
+    }
+  } catch (error) {
+    console.error('Delete Twilio Lock Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+app.post('/api/requeue-pending-jobs', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { campaign_id } = body;
+    
+    if (!campaign_id) {
+      return c.json({
+        status: 'error',
+        message: 'Missing campaign_id parameter'
+      }, 400);
+    }
+
+    // Find pending call jobs for this campaign
+    const { data: pendingJobs, error } = await c.req.db
+      .from('call_jobs')
+      .select('*')
+      .eq('campaign_id', campaign_id)
+      .eq('status', 'pending');
+
+    if (error) {
+      return c.json({
+        status: 'error',
+        message: 'Failed to fetch pending jobs',
+        error: error.message
+      }, 500);
+    }
+
+    if (!pendingJobs || pendingJobs.length === 0) {
+      return c.json({
+        status: 'success',
+        message: 'No pending jobs found',
+        requeued_count: 0
+      });
+    }
+
+    console.log(`🔄 Found ${pendingJobs.length} pending jobs to requeue for campaign: ${campaign_id}`);
+
+    let requeuedCount = 0;
+    for (const job of pendingJobs) {
+      try {
+        console.log(`🚀 Requeuing job: ${job.job_id} for contact: ${job.payload.contact_phone}`);
+        
+        await c.req.env.calls_que.send({
+          job_id: job.job_id,
+          payload: job.payload
+        });
+        
+        requeuedCount++;
+        console.log(`✅ Successfully requeued job: ${job.job_id}`);
+      } catch (error) {
+        console.error(`❌ Failed to requeue job ${job.job_id}:`, error);
+      }
+    }
+
+    return c.json({
+      status: 'success',
+      message: `Successfully requeued ${requeuedCount} pending jobs`,
+      total_pending: pendingJobs.length,
+      requeued_count: requeuedCount
+    });
+
+  } catch (error) {
+    console.error('Requeue Pending Jobs Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
 app.get('/api/check-twilio-lock', async (c) => {
   try {
     const twilio_number = c.req.query('twilio_number');
@@ -806,10 +1041,60 @@ app.get('/api/check-twilio-lock', async (c) => {
       status: 'success',
       twilio_number,
       is_locked: !!isLocked,
-      lock_key: twilioLockKey
+      lock_key: twilioLockKey,
+      lock_value: isLocked
     });
   } catch (error) {
     console.error('Check Twilio Lock Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+app.post('/api/clear-all-locks', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { twilio_numbers } = body;
+    
+    if (!twilio_numbers || !Array.isArray(twilio_numbers)) {
+      return c.json({
+        status: 'error',
+        message: 'Missing or invalid twilio_numbers array'
+      }, 400);
+    }
+
+    const results = [];
+    for (const number of twilio_numbers) {
+      const twilioLockKey = `locked_twilio:${number}`;
+      try {
+        const wasLocked = await c.req.env.ACTIVE_CALLS.get(twilioLockKey);
+        await c.req.env.ACTIVE_CALLS.delete(twilioLockKey);
+        results.push({
+          number,
+          was_locked: !!wasLocked,
+          cleared: true
+        });
+        console.log(`🧹 Cleared lock for number: ${number}`);
+      } catch (error) {
+        results.push({
+          number,
+          was_locked: false,
+          cleared: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    }
+    
+    return c.json({
+      status: 'success',
+      message: `Processed ${twilio_numbers.length} numbers`,
+      results
+    });
+  } catch (error) {
+    console.error('Clear All Locks Error:', error);
     return c.json({
       status: 'error',
       message: 'Internal Server Error',
@@ -1003,6 +1288,8 @@ export default {
     // Import here to avoid circular dependencies
     const { getSupabaseClient } = await import('./lib/supabase/client');
     const { getEnv } = await import('./config/env');
+
+    console.log("queue batch recevied ", batch.messages);
     
     for (const msg of batch.messages) {
       const { job_id, payload } = msg.body;
@@ -1031,115 +1318,261 @@ export default {
 
         let ultravoxData = null;
         let callId = null;
-        while (true) {
-          try {
-            // Call TwilioService.makeCall
-            const twilioService = TwilioService.getInstance();
-            twilioService.setDependencies(supabase, processedEnv);
-            
-            payload.callConfig.metadata = {
-              ...payload.callConfig.metadata,
-              job_id: job_id
-            };
+        
+        // Get retry count from database (instead of payload since Cloudflare Queue doesn't support payload modification)
+        let retryCount = 0;
+        try {
+          const { data: jobData } = await supabase
+            .from('call_jobs')
+            .select('retry_count')
+            .eq('job_id', job_id)
+            .single();
+          retryCount = jobData?.retry_count || 0;
+        } catch (error) {
+          console.log('Could not retrieve retry count, defaulting to 0');
+          retryCount = 0;
+        }
+        const maxRetries = 10;
+        
+        if (retryCount >= maxRetries) {
+          console.log(`❌ Job ${job_id} exceeded max retries (${maxRetries}), marking as failed`);
+          
+          // Mark as permanently failed
+          await supabase.from('call_jobs').upsert({ 
+            job_id, 
+            status: 'failed', 
+            error_message: `Exceeded maximum retry attempts (${maxRetries})`, 
+            updated_at: new Date().toISOString(), 
+            processed_at: new Date().toISOString() 
+          }, { onConflict: 'job_id' });
 
-            console.log("i am anrasimha ", payload.campaign_settings?.enableNumberLocking);
-                       // console.log("Queue Processing Payload", payload);
-            const result = await twilioService.makeCall({ 
-              ...payload, 
-              supabase, 
-              env, 
-              configureBots: true,
-              enableNumberLocking: payload.campaign_settings?.enableNumberLocking || false,
-              twilioFromNumbers: payload.twilio_phone_numbers // Pass array of numbers for round-robin
-            });
-            // Extract callId from result (if present)
-            callId = result?.callId || null;
-            ultravoxData = result;
-            break; // Success, exit retry loop
-          } catch (error) {
-            console.log("Queue Processing Error", error);
-            const errorMessage = error instanceof Error ? error.message : String(error);
+          // Update campaign contact status if this is a campaign call
+          if (payload.campaign_id && payload.contact_id) {
+            await supabase
+              .from('call_campaign_contacts')
+              .update({
+                call_status: 'failed',
+                error_message: `Exceeded maximum retry attempts (${maxRetries})`,
+                completed_at: new Date().toISOString()
+              })
+              .eq('contact_id', payload.contact_id);
+          }
+          
+          // Log to dead letter queue table for observability
+          try {
+            await supabase.from('call_failed_jobs').insert([{
+              job_id,
+              campaign_id: payload.campaign_id,
+              contact_id: payload.contact_id,
+              contact_phone: payload.contact_phone || payload.toNumber,
+              error_message: `Exceeded maximum retry attempts (${maxRetries})`,
+              retry_count: retryCount,
+              failed_at: new Date().toISOString(),
+              payload: payload
+            }]);
+          } catch (dlqError) {
+            console.error('Failed to log to dead letter queue:', dlqError);
+          }
+          
+          return;
+        }
+        
+        try {
+          // Call TwilioService.makeCall (single attempt)
+          const twilioService = TwilioService.getInstance();
+          twilioService.setDependencies(supabase, processedEnv);
+          
+          payload.callConfig.metadata = {
+            ...(payload.callConfig.metadata || {}),
+            job_id: job_id
+          };
+
+          console.log(`🔄 Processing job ${job_id} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+          console.log("Number locking enabled:", payload.campaign_settings?.enableNumberLocking);
+          
+          const result = await twilioService.makeCall({ 
+            ...payload, 
+            supabase, 
+            env, 
+            configureBots: true,
+            enableNumberLocking: payload.campaign_settings?.enableNumberLocking || false,
+            twilioFromNumbers: payload.twilio_phone_numbers // Pass array of numbers for round-robin
+          });
+          
+          // Extract callId from result (if present)
+          callId = result?.callId || null;
+          ultravoxData = result;
+          
+        } catch (error) {
+          console.log("Queue Processing Error", error);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          
+          // Calculate exponential backoff delay: 15 * 2^retryCount, max 300 seconds
+          const baseDelay = 15;
+          const exponentialDelay = Math.min(300, baseDelay * Math.pow(2, retryCount));
+          
+          // If Ultravox returns 429, use exponential backoff
+          if (errorMessage.toLowerCase().includes('concurency limit')) {
+            console.log(`🔄 Ultravox concurrency limit hit, retrying in ${exponentialDelay}s (attempt ${retryCount + 1})`);
             
-            // If Ultravox returns 429, retry after 60s
-            if (errorMessage.toLowerCase().includes('concurency limit')) {
-              // Reset job status back to pending for retry
-              await supabase.from('call_jobs').upsert({ 
-                job_id, 
-                status: 'pending', 
-                error_message: `Waiting for Ultravox capacity - ${new Date().toISOString()}`,
-                updated_at: new Date().toISOString() 
-              }, { onConflict: 'job_id' });
-              
-              // Reset campaign contact status if this is a campaign call
-              if (payload.campaign_id && payload.contact_id) {
-                await supabase
-                  .from('call_campaign_contacts')
-                  .update({
-                    call_status: 'queued',
-                    error_message: `Waiting for Ultravox capacity - ${new Date().toISOString()}`
-                  })
-                  .eq('contact_id', payload.contact_id);
-              }
-              
-              msg.retry({
-                delaySeconds: 60
-              });
-              return; // Exit current processing attempt, message will be retried later
-            }
-            
-            // If Twilio number is busy, retry after 15s for faster processing
-            if (errorMessage.includes('TWILIO_BUSY:')) {
-              console.log(`Twilio number busy, retrying in 15 seconds: ${errorMessage}`);
-              console.log(`Job ID: ${job_id}, Contact: ${payload.contact_phone || payload.toNumber}`);
-              
-              // Reset job status back to pending for retry
-              await supabase.from('call_jobs').upsert({ 
-                job_id, 
-                status: 'pending', 
-                error_message: `Waiting for available Twilio number - ${new Date().toISOString()}`,
-                updated_at: new Date().toISOString() 
-              }, { onConflict: 'job_id' });
-              
-              // Reset campaign contact status if this is a campaign call
-              if (payload.campaign_id && payload.contact_id) {
-                await supabase
-                  .from('call_campaign_contacts')
-                  .update({
-                    call_status: 'queued',
-                    error_message: `Waiting for available Twilio number - ${new Date().toISOString()}`
-                  })
-                  .eq('contact_id', payload.contact_id);
-              }
-              
-              msg.retry({
-                delaySeconds: 15
-              });
-              return; // Exit current processing attempt, message will be retried later
-            }
-            
-            
-            // Other error, mark as failed
+            // Reset job status back to pending for retry
             await supabase.from('call_jobs').upsert({ 
               job_id, 
-              status: 'failed', 
-              error_message: errorMessage, 
-              updated_at: new Date().toISOString(), 
-              processed_at: new Date().toISOString() 
+              status: 'pending', 
+              error_message: `Waiting for Ultravox capacity - attempt ${retryCount + 1} - ${new Date().toISOString()}`,
+              updated_at: new Date().toISOString() 
             }, { onConflict: 'job_id' });
-
-            // Update campaign contact status if this is a campaign call
+            
+            // Reset campaign contact status if this is a campaign call
             if (payload.campaign_id && payload.contact_id) {
               await supabase
                 .from('call_campaign_contacts')
                 .update({
-                  call_status: 'failed',
-                  error_message: errorMessage,
-                  completed_at: new Date().toISOString()
+                  call_status: 'queued',
+                  error_message: `Waiting for Ultravox capacity - attempt ${retryCount + 1} - ${new Date().toISOString()}`
                 })
                 .eq('contact_id', payload.contact_id);
             }
+            
+            // Store updated retry count in database instead of message payload since 
+            // Cloudflare Queue doesn't support payload modification in retry
+            await supabase.from('call_jobs').upsert({ 
+              job_id, 
+              retry_count: retryCount + 1,
+              updated_at: new Date().toISOString() 
+            }, { onConflict: 'job_id' });
+            
+            msg.retry({
+              delaySeconds: exponentialDelay
+            });
             return;
           }
+          
+          // If Twilio number is busy, use shorter exponential backoff
+          if (errorMessage.includes('TWILIO_BUSY:')) {
+            // Check if we've exceeded max retries for TWILIO_BUSY errors too
+            if (retryCount >= maxRetries) {
+              console.log(`❌ Job ${job_id} exceeded max retries (${maxRetries}) for TWILIO_BUSY, marking as failed`);
+              
+              // Mark as permanently failed
+              await supabase.from('call_jobs').upsert({ 
+                job_id, 
+                status: 'failed', 
+                error_message: `All Twilio numbers busy - exceeded max retries (${maxRetries})`, 
+                updated_at: new Date().toISOString(), 
+                processed_at: new Date().toISOString() 
+              }, { onConflict: 'job_id' });
+
+              // Update campaign contact status if this is a campaign call
+              if (payload.campaign_id && payload.contact_id) {
+                await supabase
+                  .from('call_campaign_contacts')
+                  .update({
+                    call_status: 'failed',
+                    error_message: `All Twilio numbers busy - exceeded max retries (${maxRetries})`,
+                    completed_at: new Date().toISOString()
+                  })
+                  .eq('contact_id', payload.contact_id);
+              }
+              
+              // Log to dead letter queue table for observability
+              try {
+                await supabase.from('call_failed_jobs').insert([{
+                  job_id,
+                  campaign_id: payload.campaign_id,
+                  contact_id: payload.contact_id,
+                  contact_phone: payload.contact_phone || payload.toNumber,
+                  error_message: `All Twilio numbers busy - exceeded max retries (${maxRetries})`,
+                  retry_count: retryCount,
+                  failed_at: new Date().toISOString(),
+                  payload: payload
+                }]);
+              } catch (dlqError) {
+                console.error('Failed to log to dead letter queue:', dlqError);
+              }
+              
+              return;
+            }
+            
+            // Add minimum delay to prevent race conditions + exponential backoff
+            const minDelayForRaceCondition = 3; // Minimum 3 seconds to prevent race conditions
+            const exponentialBackoff = baseDelay * Math.pow(1.5, retryCount);
+            const twilioDelay = Math.min(120, Math.max(minDelayForRaceCondition, exponentialBackoff));
+            console.log(`📞 Twilio numbers busy, retrying in ${twilioDelay}s (attempt ${retryCount + 1}/${maxRetries + 1}): ${errorMessage}`);
+            console.log(`Job ID: ${job_id}, Contact: ${payload.contact_phone || payload.toNumber}`);
+            
+            // Reset job status back to pending for retry
+            await supabase.from('call_jobs').upsert({ 
+              job_id, 
+              status: 'pending', 
+              error_message: `Waiting for available Twilio number - attempt ${retryCount + 1} - ${new Date().toISOString()}`,
+              updated_at: new Date().toISOString() 
+            }, { onConflict: 'job_id' });
+            
+            // Reset campaign contact status if this is a campaign call
+            if (payload.campaign_id && payload.contact_id) {
+              await supabase
+                .from('call_campaign_contacts')
+                .update({
+                  call_status: 'queued',
+                  error_message: `Waiting for available Twilio number - attempt ${retryCount + 1} - ${new Date().toISOString()}`
+                })
+                .eq('contact_id', payload.contact_id);
+            }
+            
+            // Store updated retry count in database
+            await supabase.from('call_jobs').upsert({ 
+              job_id, 
+              retry_count: retryCount + 1,
+              updated_at: new Date().toISOString() 
+            }, { onConflict: 'job_id' });
+            
+            msg.retry({
+              delaySeconds: twilioDelay
+            });
+            continue;
+          }
+          
+          // Other error, mark as failed immediately
+          console.log(`❌ Permanent failure for job ${job_id}: ${errorMessage}`);
+          
+          await supabase.from('call_jobs').upsert({ 
+            job_id, 
+            status: 'failed', 
+            error_message: errorMessage, 
+            updated_at: new Date().toISOString(), 
+            processed_at: new Date().toISOString() 
+          }, { onConflict: 'job_id' });
+
+          // Update campaign contact status if this is a campaign call
+          if (payload.campaign_id && payload.contact_id) {
+            await supabase
+              .from('call_campaign_contacts')
+              .update({
+                call_status: 'failed',
+                error_message: errorMessage,
+                completed_at: new Date().toISOString()
+              })
+              .eq('contact_id', payload.contact_id);
+          }
+          
+          // Log to dead letter queue table for observability
+          try {
+            await supabase.from('call_failed_jobs').insert([{
+              job_id,
+              campaign_id: payload.campaign_id,
+              contact_id: payload.contact_id,
+              contact_phone: payload.contact_phone || payload.toNumber,
+              error_message: errorMessage,
+              retry_count: retryCount,
+              failed_at: new Date().toISOString(),
+              payload: payload
+            }]);
+          } catch (dlqError) {
+            console.error('Failed to log to dead letter queue:', dlqError);
+          }
+          
+          continue;
         }
         // Success: update job with callId
         await supabase.from('call_jobs').upsert({ 

@@ -374,29 +374,51 @@ export class TwilioService {
         if (enableNumberLocking && twilioFromNumbers && twilioFromNumbers.length > 0) {
             let availableNumber = null;
             
-            // Try each Twilio number to find one that's not locked
-            for (const number of twilioFromNumbers) {
-                const twilioLockKey = `locked_twilio:${number}`;
+            // Add randomization to reduce contention when multiple jobs run simultaneously
+            const shuffledNumbers = [...twilioFromNumbers].sort(() => Math.random() - 0.5);
+            
+            // Try each Twilio number with atomic check-and-lock to prevent race conditions
+            for (const rawNumber of shuffledNumbers) {
+                // Normalize number for locking (remove formatting)
+                const normalizedNumber = rawNumber.replaceAll("+", "").replaceAll(" ", "").replaceAll("-", "");
+                const twilioLockKey = `locked_twilio:${normalizedNumber}`;
+                
+                // Check if number is locked
                 const isTwilioLocked = await env.ACTIVE_CALLS.get(twilioLockKey);
                 
                 if (!isTwilioLocked) {
-                    availableNumber = number;
-                    break;
+                    // Try to lock it immediately with a unique identifier to detect conflicts
+                    const lockId = `${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+                    await env.ACTIVE_CALLS.put(twilioLockKey, lockId, { expirationTtl: 600 }); // 10 minutes max lock time
+                    
+                    // Wait a small amount to let any concurrent operations complete
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                    
+                    // Verify we still have the lock (check for race condition)
+                    const currentLock = await env.ACTIVE_CALLS.get(twilioLockKey);
+                    
+                    if (currentLock === lockId) {
+                        // We successfully have the lock - use original formatted number for DB lookup
+                        availableNumber = rawNumber;
+                        console.log(`🔒 Successfully locked Twilio number: ${normalizedNumber} with ID: ${lockId}`);
+                        break;
+                    } else {
+                        // Someone else got the lock, try next number
+                        console.log(`⚠️  Lost race condition for number ${normalizedNumber}, trying next...`);
+                        continue;
+                    }
+                } else {
+                    console.log(`⚠️  Number ${normalizedNumber} already locked: ${isTwilioLocked}`);
                 }
             }
             
             if (!availableNumber) {
                 // All numbers are busy, throw error for retry
+                console.log(`🚫 All ${twilioFromNumbers.length} Twilio numbers are busy`);
                 throw new Error(`TWILIO_BUSY:ALL_NUMBERS_BUSY`);
             }
             
             selectedTwilioNumber = availableNumber;
-            
-            // Lock the selected Twilio FROM number before making the call
-            const twilioLockKey = `locked_twilio:${selectedTwilioNumber}`;
-            await env.ACTIVE_CALLS.put(twilioLockKey, 'locked', { expirationTtl: 1800 }); // 30 minutes expiration
-            
-            console.log(`Locked Twilio FROM number: ${selectedTwilioNumber}`);
         } else if (enableNumberLocking) {
             // Single number locking (backward compatibility)
             if (!twilioFromNumber) {
@@ -411,7 +433,7 @@ export class TwilioService {
             }
             
             // Lock the Twilio FROM number before making the call
-            await env.ACTIVE_CALLS.put(twilioLockKey, 'locked', { expirationTtl: 1800 }); // 30 minutes expiration
+            await env.ACTIVE_CALLS.put(twilioLockKey, 'locked', { expirationTtl: 600 }); // 10 minutes expiration
             
             console.log(`Locked Twilio FROM number: ${twilioFromNumber}`);
         } else {
@@ -434,15 +456,31 @@ export class TwilioService {
                 throw new Error("Bot not found");
             }
         // Get Twilio number details using the selected number
+        console.log(`🔍 Looking up Twilio number in database: "${selectedTwilioNumber}"`);
+        
         const { data: twilioNumber, error: twilioNumberError } = await supabase
             .from('twilio_phone_numbers')
-            .select('id , account_id')
+            .select('id , account_id, phone_number')
             .eq('phone_number', selectedTwilioNumber);
         
-            console.log(twilioNumber , "i am getting data from twilio_number table haha");
+        console.log("🔍 Database lookup result:", { twilioNumber, twilioNumberError });
 
         if (twilioNumberError) {
+            console.error("❌ Database error looking up Twilio number:", twilioNumberError);
             throw new Error("Twilio Number not found");
+        }
+
+        if (!twilioNumber || twilioNumber.length === 0) {
+            // Try to find all numbers in the database to debug formatting differences
+            const { data: allNumbers } = await supabase
+                .from('twilio_phone_numbers')
+                .select('phone_number')
+                .limit(10);
+            
+            console.error(`❌ No Twilio number found for: "${selectedTwilioNumber}"`);
+            console.error("📋 Available numbers in database:", allNumbers?.map(n => `"${n.phone_number}"`));
+            
+            throw new Error(`Twilio Number not found in database: ${selectedTwilioNumber}`);
         }
 
         // Get Twilio account details
@@ -823,7 +861,10 @@ export class TwilioService {
 
             // ALWAYS unlock the Twilio FROM number if locking was enabled (regardless of end reason)
             if (numberLockingEnabled && twilioFromNumber && this.env) {
-                const twilioLockKey = `locked_twilio:${twilioFromNumber}`;
+                let number = twilioFromNumber.replaceAll("+", "");
+                number = number.replaceAll(" ", "");
+                number = number.replaceAll("-", "");
+                const twilioLockKey = `locked_twilio:${number}`;
                 try {
                     await this.env.ACTIVE_CALLS.delete(twilioLockKey);
                     console.log(`✅ Successfully unlocked Twilio FROM number: ${twilioFromNumber} (EndReason: ${callConfig.endReason})`);
