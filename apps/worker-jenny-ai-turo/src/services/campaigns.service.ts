@@ -1,6 +1,14 @@
 import { randomUUID } from "crypto";
 import { TwilioService } from "./twilio.service";
 
+export interface TimeWindow {
+  start_hour: number; // 0-23 (24-hour format)
+  start_minute: number; // 0-59
+  end_hour: number; // 0-23 (24-hour format)
+  end_minute: number; // 0-59
+  days_of_week?: number[]; // 0=Sunday, 1=Monday, etc. If not specified, applies to all days
+}
+
 export interface BulkCallPayload {
   campaign_id: string;
   contact_id: string;
@@ -17,6 +25,8 @@ export interface BulkCallPayload {
   user_id: string;
   campaign_settings?: {
     enableNumberLocking?: boolean;
+    timeWindow?: TimeWindow;
+    timezone?: string;
   };
 }
 
@@ -37,6 +47,51 @@ export class CampaignsService {
   public setDependencies(db: any, env: any) {
     this.db = db;
     this.env = env;
+  }
+
+  /**
+   * Check if current time is within the allowed time window for a campaign
+   */
+  public isWithinTimeWindow(timeWindow: TimeWindow | undefined, timezone: string = 'UTC'): boolean {
+    if (!timeWindow) {
+      return true; // No time restriction
+    }
+
+    try {
+      // Get current time in the specified timezone
+      const now = new Date();
+      const currentTime = new Date(now.toLocaleString("en-US", { timeZone: timezone }));
+      
+      const currentHour = currentTime.getHours();
+      const currentMinute = currentTime.getMinutes();
+      const currentDay = currentTime.getDay(); // 0=Sunday, 1=Monday, etc.
+      
+      // Check day of week restriction if specified
+      if (timeWindow.days_of_week && timeWindow.days_of_week.length > 0) {
+        if (!timeWindow.days_of_week.includes(currentDay)) {
+          console.log(`❌ Current day (${currentDay}) not in allowed days: ${timeWindow.days_of_week}`);
+          return false;
+        }
+      }
+      
+      // Convert current time to minutes for easier comparison
+      const currentTotalMinutes = currentHour * 60 + currentMinute;
+      const startTotalMinutes = timeWindow.start_hour * 60 + timeWindow.start_minute;
+      const endTotalMinutes = timeWindow.end_hour * 60 + timeWindow.end_minute;
+      
+      // Handle time windows that cross midnight (e.g., 10 PM to 6 AM)
+      if (startTotalMinutes > endTotalMinutes) {
+        // Time window crosses midnight
+        return currentTotalMinutes >= startTotalMinutes || currentTotalMinutes <= endTotalMinutes;
+      } else {
+        // Normal time window within the same day
+        return currentTotalMinutes >= startTotalMinutes && currentTotalMinutes <= endTotalMinutes;
+      }
+      
+    } catch (error) {
+      console.error('Error checking time window:', error);
+      return true; // Default to allowing calls if there's an error
+    }
   }
 
   /**
@@ -211,7 +266,11 @@ export class CampaignsService {
                 // Campaign-specific data for tracking
                 campaign_id,
                 contact_id: contact.contact_id,
-                campaign_settings: campaignData.campaign_settings
+                campaign_settings: {
+                  ...campaignData.campaign_settings,
+                  // Enable number locking by default for campaigns with multiple numbers
+                  enableNumberLocking: campaignData.twilio_phone_numbers?.length > 1 ? true : (campaignData.campaign_settings?.enableNumberLocking || false)
+                }
               }
             });
             console.log(`🚀 Successfully sent job to queue: ${job_id} for contact: ${contact.contact_phone}`);

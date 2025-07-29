@@ -1378,6 +1378,51 @@ export default {
         }
         
         try {
+          // Check time window before making the call
+          if (payload.campaign_settings?.timeWindow) {
+            const { CampaignsService } = await import('./services/campaigns.service');
+            const campaignsService = CampaignsService.getInstance();
+            campaignsService.setDependencies(supabase, processedEnv);
+            
+            // Use the campaign's timezone or default to UTC
+            const timezone = payload.campaign_settings?.timezone || 'UTC';
+            const isWithinWindow = campaignsService.isWithinTimeWindow(
+              payload.campaign_settings.timeWindow, 
+              timezone
+            );
+            
+            if (!isWithinWindow) {
+              console.log(`⏰ Job ${job_id} is outside time window, requeueing for later`);
+              
+              // Calculate delay until next allowed time (15 minutes minimum)
+              const delayMinutes = 15;
+              
+              // Reset job status back to pending for retry
+              await supabase.from('call_jobs').upsert({ 
+                job_id, 
+                status: 'pending', 
+                error_message: `Outside time window - requeueing for ${delayMinutes} minutes - ${new Date().toISOString()}`,
+                updated_at: new Date().toISOString() 
+              }, { onConflict: 'job_id' });
+              
+              // Reset campaign contact status if this is a campaign call
+              if (payload.campaign_id && payload.contact_id) {
+                await supabase
+                  .from('call_campaign_contacts')
+                  .update({
+                    call_status: 'queued',
+                    error_message: `Outside time window - requeueing for ${delayMinutes} minutes - ${new Date().toISOString()}`
+                  })
+                  .eq('contact_id', payload.contact_id);
+              }
+              
+              msg.retry({
+                delaySeconds: delayMinutes * 60 // Convert to seconds
+              });
+              return;
+            }
+          }
+          
           // Call TwilioService.makeCall (single attempt)
           const twilioService = TwilioService.getInstance();
           twilioService.setDependencies(supabase, processedEnv);
@@ -1389,6 +1434,7 @@ export default {
 
           console.log(`🔄 Processing job ${job_id} (attempt ${retryCount + 1}/${maxRetries + 1})`);
           console.log("Number locking enabled:", payload.campaign_settings?.enableNumberLocking);
+          console.log("Time window check:", payload.campaign_settings?.timeWindow ? "Passed" : "Not configured");
           
           const result = await twilioService.makeCall({ 
             ...payload, 
