@@ -927,6 +927,7 @@ export class TwilioService {
                     is_appointment_booking_allowed: string;
                     appointment_tool_id: string;
                     knowledge_base_id: string;
+                    selected_tools?: string[];
                 };
                 error: any;
             };
@@ -952,6 +953,31 @@ export class TwilioService {
                     }
                 })
             };
+
+            // Add user's selected custom tools
+            if(bot.selected_tools && bot.selected_tools.length > 0) {
+                console.log("Adding selected custom tools:", bot.selected_tools);
+                
+                // Get tool details from database to verify ownership
+                const { data: userTools, error: toolsError } = await supabase
+                    .from('tools')
+                    .select('tool_id, name, model_tool_name, definition')
+                    .eq('user_id', userId)
+                    .eq('is_active', true)
+                    .in('tool_id', bot.selected_tools);
+
+                if (toolsError) {
+                    console.error("Error fetching user tools:", toolsError);
+                } else if (userTools && userTools.length > 0) {
+                    // Add each selected tool
+                    userTools.forEach(tool => {
+                        console.log("Adding tool:", tool.name, tool.tool_id);
+                        tools.push({
+                            toolId: tool.tool_id
+                        });
+                    });
+                }
+            }
 
             return tools;
         }
