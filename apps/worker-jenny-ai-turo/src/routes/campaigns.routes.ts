@@ -10,7 +10,8 @@ import {
   getCampaignStats,
   updateCampaignSchedule,
   getScheduledCampaigns,
-  createCampaignExecution
+  createCampaignExecution,
+  processCallAnswers
 } from "../controller/campaigns.controller";
 import { CampaignsService } from "../services/campaigns.service";
 import { Env } from "../config/env";
@@ -35,6 +36,9 @@ campaignsRoutes.post("/:campaign_id/executions", createCampaignExecution);
 
 // Contact management endpoints
 campaignsRoutes.put("/:campaign_id/contacts/:contact_id", updateContact);
+
+// AI processing endpoints
+campaignsRoutes.post("/process-answers", processCallAnswers);
 
 // Manual trigger for processing scheduled campaigns (for testing)
 campaignsRoutes.post('/process-scheduled', async (c) => {
