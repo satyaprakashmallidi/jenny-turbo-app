@@ -1316,7 +1316,6 @@ export default {
             .eq('contact_id', payload.contact_id);
         }
 
-        let ultravoxData = null;
         let callId = null;
         
         // Get retry count from database (instead of payload since Cloudflare Queue doesn't support payload modification)
@@ -1427,12 +1426,21 @@ export default {
           const twilioService = TwilioService.getInstance();
           twilioService.setDependencies(supabase, processedEnv);
           
+          // Ensure metadata is properly set for campaign calls
           payload.callConfig.metadata = {
             ...(payload.callConfig.metadata || {}),
-            job_id: job_id
+            job_id: job_id,
+            campaign_id: payload.campaign_id,
+            contact_id: payload.contact_id
           };
 
           console.log(`🔄 Processing job ${job_id} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+          console.log("📋 Full campaign metadata being sent:", {
+            job_id: job_id,
+            campaign_id: payload.campaign_id,
+            contact_id: payload.contact_id,
+            metadata_in_callConfig: payload.callConfig.metadata
+          });
           console.log("Number locking enabled:", payload.campaign_settings?.enableNumberLocking);
           console.log("Time window check:", payload.campaign_settings?.timeWindow ? "Passed" : "Not configured");
           
@@ -1447,7 +1455,6 @@ export default {
           
           // Extract callId from result (if present)
           callId = result?.callId || null;
-          ultravoxData = result;
           
         } catch (error) {
           console.log("Queue Processing Error", error);
@@ -1621,23 +1628,42 @@ export default {
           continue;
         }
         // Success: update job with callId
-        await supabase.from('call_jobs').upsert({ 
+        console.log(`✅ Call created successfully with Ultravox call ID: ${callId}`);
+        const { error: jobUpdateError } = await supabase.from('call_jobs').upsert({ 
           job_id, 
           status: 'success', 
           ultravox_call_id: callId,
           updated_at: new Date().toISOString(), 
           processed_at: new Date().toISOString() 
         }, { onConflict: 'job_id' });
+        
+        if (jobUpdateError) {
+          console.error(`❌ Failed to update job with ultravox_call_id:`, jobUpdateError);
+        } else {
+          console.log(`✅ Successfully updated job ${job_id} with ultravox_call_id: ${callId}`);
+        }
 
         // Update campaign contact with call ID if this is a campaign call
         if (payload.campaign_id && payload.contact_id && callId) {
-          await supabase
+          console.log(`📞 Updating campaign contact with ultravox_call_id:`, {
+            campaign_id: payload.campaign_id,
+            contact_id: payload.contact_id,
+            ultravox_call_id: callId
+          });
+          
+          const { error: contactUpdateError } = await supabase
             .from('call_campaign_contacts')
             .update({
               ultravox_call_id: callId,
               call_status: 'in_progress' // Will be updated to completed by webhook
             })
             .eq('contact_id', payload.contact_id);
+            
+          if (contactUpdateError) {
+            console.error(`❌ Failed to update campaign contact with ultravox_call_id:`, contactUpdateError);
+          } else {
+            console.log(`✅ Successfully updated campaign contact ${payload.contact_id} with call ID`);
+          }
         }
 
       } catch (error) {

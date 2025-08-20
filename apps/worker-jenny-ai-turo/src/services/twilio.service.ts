@@ -358,8 +358,8 @@ export class TwilioService {
         configureBots?: boolean;
         enableNumberLocking?: boolean;
     }) {
-        const { botId, toNumber, twilioFromNumber, twilioFromNumbers, userId, placeholders, tools, supabase, env, transferTo, isSingleTwilioAccount, callConfig : call_config, configureBots, enableNumberLocking } = params;
-
+        const { botId, toNumber, twilioFromNumber, twilioFromNumbers, userId, placeholders, tools, supabase, env, isSingleTwilioAccount, callConfig : call_config, configureBots, enableNumberLocking } = params;
+        let transferTo = params.transferTo;
         console.log("calling ", toNumber  ,"with locking" , twilioFromNumber , twilioFromNumbers, enableNumberLocking);
         
         let account_sid = "";
@@ -374,11 +374,20 @@ export class TwilioService {
         if (enableNumberLocking && twilioFromNumbers && twilioFromNumbers.length > 0) {
             let availableNumber = null;
             
-            // Add randomization to reduce contention when multiple jobs run simultaneously
-            const shuffledNumbers = [...twilioFromNumbers].sort(() => Math.random() - 0.5);
+            // Get customer timezone and sort numbers by proximity
+            let orderedNumbers = twilioFromNumbers;
+            try {
+                const customerTimezone = await this.getCustomerTimezone(toNumber);
+                orderedNumbers = await this.sortNumbersByTimezoneProximity(twilioFromNumbers, customerTimezone, supabase);
+                console.log(`📍 Customer timezone: ${customerTimezone}, ordered numbers by proximity:`, orderedNumbers);
+            } catch (error) {
+                console.log(`⚠️  Could not determine customer timezone, using randomized order:`, error);
+                // Fallback to randomization if timezone detection fails
+                orderedNumbers = [...twilioFromNumbers].sort(() => Math.random() - 0.5);
+            }
             
             // Try each Twilio number with atomic check-and-lock to prevent race conditions
-            for (const rawNumber of shuffledNumbers) {
+            for (const rawNumber of orderedNumbers) {
                 // Normalize number for locking (remove formatting)
                 const normalizedNumber = rawNumber.replaceAll("+", "").replaceAll(" ", "").replaceAll("-", "");
                 const twilioLockKey = `locked_twilio:${normalizedNumber}`;
@@ -447,7 +456,7 @@ export class TwilioService {
         // Get bot details
             const { data: bot, error: botError } = await supabase
                 .from('bots')
-                .select('voice, system_prompt')
+                .select('voice, system_prompt , is_call_transfer_allowed , call_transfer_number')
                 .eq('id', botId)
                 .eq('user_id', userId)
                 .single();
@@ -572,7 +581,7 @@ export class TwilioService {
                 ...processedTools
             ],
             //@ts-ignore
-            firstSpeaker: "FIRST_SPEAKER_AGENT",
+            firstSpeaker: "FIRST_SPEAKER_USER",
             metadata: {
                 botId,
                 userId,
@@ -590,17 +599,23 @@ export class TwilioService {
             callConfig.metadata = {};
         }
 
+        // Preserve campaign metadata from the incoming call_config
         if(call_config?.metadata?.job_id){
             callConfig.metadata.job_id = call_config.metadata.job_id;
+            console.log(`📋 Preserving job_id in metadata: ${call_config.metadata.job_id}`);
         }
 
         if(call_config?.metadata?.contact_id){
             callConfig.metadata.contact_id = call_config.metadata.contact_id;
+            console.log(`📋 Preserving contact_id in metadata: ${call_config.metadata.contact_id}`);
         }
 
         if(call_config?.metadata?.campaign_id){
             callConfig.metadata.campaign_id = call_config.metadata.campaign_id;
+            console.log(`📋 Preserving campaign_id in metadata: ${call_config.metadata.campaign_id}`);
         }
+        
+        console.log(`🔍 Final metadata being sent to Ultravox:`, JSON.stringify(callConfig.metadata));
 
         if(!callConfig.selectedTools?.some((tool: any) => tool.toolName === "hangUp")) {
             callConfig.selectedTools?.push({
@@ -658,6 +673,9 @@ export class TwilioService {
 
         if(transferTo) {
             additional_data_to_store_in_call_records.transferTo = transferTo;
+        }else if(bot.is_call_transfer_allowed){
+            additional_data_to_store_in_call_records.transferTo = bot.call_transfer_number;
+            transferTo = bot.call_transfer_number;
         }
 
         if(isSingleTwilioAccount) { 
@@ -1062,7 +1080,7 @@ export class TwilioService {
                 const bookingTool: SelectedTool = {
                     temporaryTool:{
                       modelToolName: "bookAppointment",
-                      timeout: "6s",
+                      timeout: "10s",
                       description: `The current date is ${new Date().toDateString().split('T')[0]} \n\nIMPORTANT: Our appointment types have specific default durations.\n- ${appointmentTypes.map(type => `${type.name}: ${type.duration} minutes`).join('\n- ')}\n\nIf a caller specifically requests a different duration, ask them to choose one from exsitning durations. Always confirm the appointment type AND duration with the caller before booking.\n\nCRITICAL RESPONSE VALIDATION INSTRUCTIONS:\n1. After calling bookAppointment, carefully check the response:\n   - Look for "success": true in the response\n   - Verify the response contains appointment details\n   - Check for any error messages\n   - Only proceed if the response indicates a successful booking\n\n2. For successful bookings (when response has success: true):\n   - Immediately confirm the booking to the user\n   - Share the appointment details (date, time, type)\n   - Do NOT mention any technical details or API responses\n   - Do NOT ask for additional confirmation\n   - Do NOT retry the booking\n\n3. For failed bookings:\n   - Check the specific error message\n   - Handle common errors (past date, timezone, etc.)\n   - Only retry if the error is recoverable\n   - After 2 failed attempts, suggest trying again later\n\n4. NEVER:\n   - Ignore a successful response\n   - Retry after a successful booking\n   - Show technical error messages to the user\n   - Ask for confirmation after a successful booking\n   - Mention API responses or technical details\n\n5. Example successful response handling:\n   If response is: { "success": true, "appointment": { ... } }\n   Say: "Perfect! I've booked your appointment for [date] at [time]."\n\n6. Example error handling:\n   If response has error: "Cannot book appointments in the past"\n   Say: "I'm sorry, but that date has already passed. Could you choose a future date?"\n\n7. Response Validation Steps:\n   a. Check success status first\n   b. If success is true, confirm booking immediately\n   c. If success is false, check error message\n   d. Handle error appropriately\n   e. Only retry if error is recoverable\n   f. After 2 failures, suggest trying again later\n\n8. Success Confirmation Format:\n   ✓ "Perfect! I've booked your [appointment type] for [date] at [time]."\n   ✓ "Great! Your appointment is confirmed for [date] at [time]."\n   ✓ "I've scheduled your [appointment type] for [date] at [time]."\n\n9. Error Response Format:\n   ✓ "I'm sorry, but [user-friendly error explanation]. Let me try again."\n   ✓ "I'm having trouble booking that time. Would you like to try a different time?"\n   ✓ "I'm unable to book the appointment right now. Please try again later."\n\n10. NEVER use these responses:\n    ❌ "The API returned an error..."\n    ❌ "Let me try booking that again..."\n    ❌ "The system is having issues..."\n    ❌ "There was a problem with the booking..."\n    ❌ Any technical error messages or API details`,
                       dynamicParameters: [
                         {
@@ -1633,5 +1651,191 @@ export class TwilioService {
 
         console.log("Successfully updated pricing. New time_rem:", pricing);
         return pricing;
+    }
+
+    /**
+     * Get customer timezone based on phone number
+     */
+    private async getCustomerTimezone(phoneNumber: string): Promise<string> {
+        try {
+            // Extract country code from phone number
+            const countryCode = this.extractCountryCode(phoneNumber);
+            
+            // Map country codes to primary timezones
+            const countryTimezones: Record<string, string> = {
+                '1': 'America/New_York',        // US/Canada (EST as default)
+                '44': 'Europe/London',          // UK
+                '33': 'Europe/Paris',           // France
+                '49': 'Europe/Berlin',          // Germany
+                '39': 'Europe/Rome',            // Italy
+                '34': 'Europe/Madrid',          // Spain
+                '31': 'Europe/Amsterdam',       // Netherlands
+                '32': 'Europe/Brussels',        // Belgium
+                '41': 'Europe/Zurich',          // Switzerland
+                '43': 'Europe/Vienna',          // Austria
+                '45': 'Europe/Copenhagen',      // Denmark
+                '46': 'Europe/Stockholm',       // Sweden
+                '47': 'Europe/Oslo',            // Norway
+                '48': 'Europe/Warsaw',          // Poland
+                '351': 'Europe/Lisbon',         // Portugal
+                '358': 'Europe/Helsinki',       // Finland
+                '91': 'Asia/Kolkata',           // India
+                '86': 'Asia/Shanghai',          // China
+                '81': 'Asia/Tokyo',             // Japan
+                '82': 'Asia/Seoul',             // South Korea
+                '61': 'Australia/Sydney',       // Australia
+                '55': 'America/Sao_Paulo',     // Brazil
+                '52': 'America/Mexico_City',   // Mexico
+                '7': 'Europe/Moscow',           // Russia
+                '90': 'Europe/Istanbul',        // Turkey
+                '971': 'Asia/Dubai',            // UAE
+                '966': 'Asia/Riyadh',           // Saudi Arabia
+                '27': 'Africa/Johannesburg',   // South Africa
+                '234': 'Africa/Lagos',          // Nigeria
+                '254': 'Africa/Nairobi',        // Kenya
+                '20': 'Africa/Cairo',           // Egypt
+            };
+
+            return countryTimezones[countryCode] || 'UTC';
+        } catch (error) {
+            console.log(`Error determining timezone for ${phoneNumber}:`, error);
+            return 'UTC';
+        }
+    }
+
+    /**
+     * Extract country code from phone number
+     */
+    private extractCountryCode(phoneNumber: string): string {
+        // Remove all non-digit characters
+        const digits = phoneNumber.replace(/\D/g, '');
+        
+        // Remove leading 1 for US/Canada numbers if length > 10
+        if (digits.length === 11 && digits.startsWith('1')) {
+            return '1';
+        }
+        
+        // Check for common country codes (longest first to avoid conflicts)
+        const countryCodes = ['971', '966', '234', '254', '351', '358', '44', '33', '49', '39', '34', '31', '32', '41', '43', '45', '46', '47', '48', '91', '86', '81', '82', '61', '55', '52', '90', '27', '20', '1', '7'];
+        
+        for (const code of countryCodes) {
+            if (digits.startsWith(code)) {
+                return code;
+            }
+        }
+        
+        // Default to US/Canada if no country code found
+        return '1';
+    }
+
+    /**
+     * Sort Twilio numbers by timezone proximity to customer
+     */
+    private async sortNumbersByTimezoneProximity(
+        twilioNumbers: string[], 
+        customerTimezone: string, 
+        supabase: any
+    ): Promise<string[]> {
+        try {
+            // Get timezone information for all Twilio numbers
+            const numbersWithTimezones = await Promise.all(
+                twilioNumbers.map(async (number) => {
+                    try {
+                        // Get account and region info for the number
+                        const { data: numberData } = await supabase
+                            .from('twilio_phone_numbers')
+                            .select(`
+                                phone_number,
+                                region,
+                                twilio_account:account_id (
+                                    account_sid,
+                                    account_name,
+                                    region
+                                )
+                            `)
+                            .eq('phone_number', number)
+                            .single();
+
+                        let numberTimezone = 'UTC';
+                        
+                        if (numberData) {
+                            // Determine timezone based on region or number prefix
+                            if (numberData.region) {
+                                numberTimezone = this.regionToTimezone(numberData.region);
+                            } else {
+                                // Fallback to extracting from phone number
+                                numberTimezone = await this.getCustomerTimezone(number);
+                            }
+                        }
+
+                        return {
+                            number,
+                            timezone: numberTimezone,
+                            timezoneOffset: this.getTimezoneOffset(numberTimezone)
+                        };
+                    } catch (error) {
+                        console.log(`Error getting timezone for number ${number}:`, error);
+                        return {
+                            number,
+                            timezone: 'UTC',
+                            timezoneOffset: 0
+                        };
+                    }
+                })
+            );
+
+            // Get customer timezone offset
+            const customerOffset = this.getTimezoneOffset(customerTimezone);
+
+            // Sort by timezone proximity (smallest offset difference first)
+            numbersWithTimezones.sort((a, b) => {
+                const offsetDiffA = Math.abs(a.timezoneOffset - customerOffset);
+                const offsetDiffB = Math.abs(b.timezoneOffset - customerOffset);
+                return offsetDiffA - offsetDiffB;
+            });
+
+            console.log(`Sorted numbers by timezone proximity:`, numbersWithTimezones.map(n => `${n.number} (${n.timezone})`));
+
+            return numbersWithTimezones.map(n => n.number);
+        } catch (error) {
+            console.log('Error sorting numbers by timezone proximity:', error);
+            // Fallback to original order
+            return twilioNumbers;
+        }
+    }
+
+    /**
+     * Map region to timezone
+     */
+    private regionToTimezone(region: string): string {
+        const regionTimezones: Record<string, string> = {
+            'us-east-1': 'America/New_York',
+            'us-west-1': 'America/Los_Angeles',
+            'us-west-2': 'America/Los_Angeles',
+            'eu-west-1': 'Europe/Dublin',
+            'eu-central-1': 'Europe/Berlin',
+            'ap-southeast-1': 'Asia/Singapore',
+            'ap-northeast-1': 'Asia/Tokyo',
+            'ap-southeast-2': 'Australia/Sydney',
+            'ca-central-1': 'America/Toronto',
+        };
+
+        return regionTimezones[region.toLowerCase()] || 'UTC';
+    }
+
+    /**
+     * Get timezone offset in hours from UTC
+     */
+    private getTimezoneOffset(timezone: string): number {
+        try {
+            const now = new Date();
+            const utc = new Date(now.getTime() + (now.getTimezoneOffset() * 60000));
+            const targetTime = new Date(utc.toLocaleString("en-US", {timeZone: timezone}));
+            const offsetHours = (targetTime.getTime() - utc.getTime()) / (1000 * 60 * 60);
+            return offsetHours;
+        } catch (error) {
+            console.log(`Error calculating offset for timezone ${timezone}:`, error);
+            return 0; // Default to UTC
+        }
     }
 }

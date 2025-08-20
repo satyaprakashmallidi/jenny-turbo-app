@@ -524,6 +524,148 @@ export class CampaignsService {
   }
 
   /**
+   * Check if all contacts in a campaign are completed and update campaign status accordingly
+   */
+  async checkAndUpdateCampaignStatus(campaign_id: string): Promise<{ success: boolean; message: string; status?: string; error?: string }> {
+    try {
+      console.log(`🔍 Checking campaign status for: ${campaign_id}`);
+      
+      // Get campaign details
+      const { data: campaignData, error: campaignError } = await this.db
+        .from('call_campaigns')
+        .select('*')
+        .eq('campaign_id', campaign_id)
+        .single();
+
+      if (campaignError || !campaignData) {
+        console.error('Campaign not found:', campaignError);
+        return { success: false, message: 'Campaign not found' };
+      }
+
+      // Skip if campaign is already completed or cancelled
+      if (campaignData.status === 'completed' || campaignData.status === 'cancelled') {
+        console.log(`Campaign ${campaign_id} is already ${campaignData.status}`);
+        return { success: true, message: `Campaign is already ${campaignData.status}`, status: campaignData.status };
+      }
+
+      // Get all contact statuses for this campaign
+      const { data: contactsData, error: contactsError } = await this.db
+        .from('call_campaign_contacts')
+        .select('call_status')
+        .eq('campaign_id', campaign_id);
+
+      if (contactsError) {
+        console.error('Error fetching contacts:', contactsError);
+        return { success: false, message: 'Failed to fetch contact statuses' };
+      }
+
+      if (!contactsData || contactsData.length === 0) {
+        console.log('No contacts found for campaign');
+        return { success: false, message: 'No contacts found for campaign' };
+      }
+
+      // Count contact statuses
+      const statusCounts = {
+        pending: 0,
+        queued: 0,
+        in_progress: 0,
+        completed: 0,
+        failed: 0,
+        cancelled: 0
+      };
+
+      contactsData.forEach((contact: any) => {
+        const status = contact.call_status as keyof typeof statusCounts;
+        if (status in statusCounts) {
+          statusCounts[status]++;
+        }
+      });
+
+      console.log(`📊 Campaign ${campaign_id} contact status breakdown:`, statusCounts);
+
+      // Determine if campaign should be marked as completed
+      const totalContacts = contactsData.length;
+      const finishedContacts = statusCounts.completed + statusCounts.failed + statusCounts.cancelled;
+      const allContactsFinished = finishedContacts === totalContacts;
+
+      if (allContactsFinished) {
+        console.log(`✅ All contacts finished for campaign ${campaign_id}. Marking campaign as completed.`);
+        
+        // Calculate completion stats
+        const completionRate = statusCounts.completed / totalContacts;
+        const failureRate = statusCounts.failed / totalContacts;
+        
+        // Update campaign status to completed
+        const { error: updateError } = await this.db
+          .from('call_campaigns')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+            completed_contacts: statusCounts.completed,
+            failed_contacts: statusCounts.failed,
+            cancelled_contacts: statusCounts.cancelled,
+            completion_rate: completionRate,
+            failure_rate: failureRate,
+            updated_at: new Date().toISOString()
+          })
+          .eq('campaign_id', campaign_id);
+
+        if (updateError) {
+          console.error('Error updating campaign status:', updateError);
+          return { success: false, message: 'Failed to update campaign status' };
+        }
+
+        // If this is a recurring campaign, schedule the next execution
+        if (campaignData.is_recurring) {
+          console.log(`🔄 Campaign is recurring, scheduling next execution...`);
+          const nextExecResult = await this.scheduleNextExecution(campaign_id);
+          console.log('Next execution scheduling result:', nextExecResult);
+        }
+
+        return { 
+          success: true, 
+          message: 'Campaign marked as completed',
+          status: 'completed'
+        };
+      } else {
+        console.log(`⏳ Campaign ${campaign_id} still in progress. ${finishedContacts}/${totalContacts} contacts finished.`);
+        
+        // Update campaign with current progress stats
+        const { error: updateError } = await this.db
+          .from('call_campaigns')
+          .update({
+            completed_contacts: statusCounts.completed,
+            failed_contacts: statusCounts.failed,
+            cancelled_contacts: statusCounts.cancelled,
+            in_progress_contacts: statusCounts.in_progress,
+            queued_contacts: statusCounts.queued,
+            pending_contacts: statusCounts.pending,
+            updated_at: new Date().toISOString()
+          })
+          .eq('campaign_id', campaign_id);
+
+        if (updateError) {
+          console.error('Error updating campaign progress:', updateError);
+        }
+
+        return { 
+          success: true, 
+          message: `Campaign still in progress: ${finishedContacts}/${totalContacts} contacts completed`,
+          status: 'in_progress'
+        };
+      }
+
+    } catch (error) {
+      console.error('Check and Update Campaign Status Error:', error);
+      return { 
+        success: false, 
+        message: 'Failed to check campaign status', 
+        error: error instanceof Error ? error.message : String(error) 
+      };
+    }
+  }
+
+  /**
    * Process scheduled campaigns (to be called by a cron job or scheduled task)
    */
   async processScheduledCampaigns(): Promise<{ success: boolean; processed_count: number; errors: any[] }> {

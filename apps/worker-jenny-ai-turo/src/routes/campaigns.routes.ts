@@ -92,4 +92,38 @@ campaignsRoutes.get('/debug-scheduled', async (c) => {
   }
 });
 
+// Manual endpoint to check and update campaign status
+campaignsRoutes.post('/:campaign_id/check-status', async (c) => {
+  try {
+    const campaign_id = c.req.param('campaign_id');
+    
+    if (!campaign_id) {
+      return c.json({
+        status: 'error',
+        message: 'Missing campaign_id'
+      }, 400);
+    }
+
+    const campaignsService = CampaignsService.getInstance();
+    campaignsService.setDependencies(c.req.db, c.req.env);
+    
+    const result = await campaignsService.checkAndUpdateCampaignStatus(campaign_id);
+    
+    return c.json({
+      status: result.success ? 'success' : 'error',
+      message: result.message,
+      campaign_status: result.status,
+      error: result.error
+    });
+
+  } catch (error) {
+    console.error('Check Campaign Status Error:', error);
+    return c.json({ 
+      status: 'error', 
+      message: 'Failed to check campaign status', 
+      error: error instanceof Error ? error.message : error 
+    }, 500);
+  }
+});
+
 export default campaignsRoutes;

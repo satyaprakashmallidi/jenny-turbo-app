@@ -151,6 +151,7 @@ export async function finishCall(c: Context) {
     const { event , call } = body;
 
     console.log( "Event", event , "Call", call);
+    console.log("📋 Call metadata received:", call?.metadata);
     
     if(event && call){
 
@@ -194,6 +195,179 @@ export async function finishCall(c: Context) {
     const twilioService = TwilioService.getInstance();
     twilioService.setDependencies(c.req.db, c.req.env);
 
+    // Extract campaign information with multiple fallback options
+    let campaign_id = call?.metadata?.['campaign_id'];
+    let contact_id = call?.metadata?.['contact_id'];
+    let job_id = call?.metadata?.['job_id'];
+
+    console.log("🔍 Extracted metadata:", { campaign_id, contact_id, job_id });
+    console.log("📋 Full metadata received:", JSON.stringify(call?.metadata));
+
+    // Fallback: Try to find campaign information from call_jobs table if not in metadata
+    if (!campaign_id || !contact_id) {
+      console.log("🔄 Campaign metadata missing, attempting database lookup...");
+      try {
+        // First try to find by ultravox_call_id
+        let jobData = null;
+        let jobError = null;
+        
+        const { data: jobByCallId, error: errorByCallId } = await c.req.db
+          .from('call_jobs')
+          .select('campaign_id, contact_id, job_id, payload')
+          .eq('ultravox_call_id', call.callId)
+          .single();
+        
+        if (!errorByCallId && jobByCallId) {
+          jobData = jobByCallId;
+          console.log("✅ Found job by ultravox_call_id");
+        } else if (job_id) {
+          // If not found by call_id but we have job_id, try that
+          console.log("🔄 Trying to find job by job_id:", job_id);
+          const { data: jobByJobId, error: errorByJobId } = await c.req.db
+            .from('call_jobs')
+            .select('campaign_id, contact_id, job_id, payload')
+            .eq('job_id', job_id)
+            .single();
+          
+          if (!errorByJobId && jobByJobId) {
+            jobData = jobByJobId;
+            console.log("✅ Found job by job_id");
+          } else {
+            jobError = errorByJobId;
+          }
+        } else {
+          // Last resort: check call_campaign_contacts table directly using call_id
+          console.log("🔄 Trying to find contact by ultravox_call_id in call_campaign_contacts:");
+          const { data: contactByCallId, error: errorContactByCallId } = await c.req.db
+            .from('call_campaign_contacts')
+            .select('campaign_id, contact_id')
+            .eq('ultravox_call_id', call.callId)
+            .single();
+          
+          if (!errorContactByCallId && contactByCallId) {
+            campaign_id = contactByCallId.campaign_id;
+            contact_id = contactByCallId.contact_id;
+            console.log("✅ Found campaign data from call_campaign_contacts table");
+          } else {
+            console.log("❌ No matching contact found in call_campaign_contacts:", errorContactByCallId?.message);
+          }
+        }
+
+        if (jobData) {
+          campaign_id = campaign_id || jobData.campaign_id;
+          contact_id = contact_id || jobData.contact_id;
+          job_id = job_id || jobData.job_id;
+          
+          // Also check the payload for campaign metadata
+          if (jobData.payload) {
+            campaign_id = campaign_id || jobData.payload.campaign_id;
+            contact_id = contact_id || jobData.payload.contact_id;
+          }
+          
+          console.log("✅ Found campaign data from database:", { campaign_id, contact_id, job_id });
+        } else if (!campaign_id || !contact_id) {
+          console.log("❌ No matching job found in database:", jobError?.message);
+        }
+      } catch (dbError) {
+        console.error("❌ Database lookup failed:", dbError);
+      }
+    }
+
+    // Update campaign contact status BEFORE pricing operations
+    if (campaign_id && contact_id) {
+      console.log("📞 Processing campaign contact update:", { campaign_id, contact_id, callId: call.callId });
+      
+      // Calculate call duration from joined to ended timestamps
+      let callDuration = 0;
+      if (call.joined && call.ended) {
+        const joinedTime = new Date(call.joined).getTime();
+        const endedTime = new Date(call.ended).getTime();
+        callDuration = Math.floor((endedTime - joinedTime) / 1000); // Duration in seconds
+      }
+
+      const updateData: any = {
+        call_status: 'completed',
+        completed_at: new Date().toISOString(),
+        call_duration: callDuration
+      };
+
+      // Add call summary if available
+      if (call.shortSummary) {
+        updateData.call_summary = call.shortSummary;
+      }
+      if (call.summary) {
+        updateData.call_notes = call.summary;
+      }
+
+      try {
+        console.log("📝 Updating campaign contact with data:", updateData);
+        
+        // Update the campaign contact
+        const { error: contactUpdateError } = await c.req.db
+          .from('call_campaign_contacts')
+          .update(updateData)
+          .eq('contact_id', contact_id);
+
+        if (contactUpdateError) {
+          console.error("❌ Error updating campaign contact:", contactUpdateError);
+        } else {
+          console.log("✅ Successfully updated campaign contact to completed status");
+          console.log("📊 Contact update details:", {
+            contact_id,
+            campaign_id,
+            call_status: updateData.call_status,
+            call_duration: updateData.call_duration,
+            has_summary: !!updateData.call_summary
+          });
+          
+          // Check if all contacts in the campaign are completed and update campaign status
+          console.log("🔄 Checking if campaign should be marked as completed...");
+          try {
+            const { CampaignsService } = await import('../services/campaigns.service');
+            const campaignsService = CampaignsService.getInstance();
+            campaignsService.setDependencies(c.req.db, c.req.env);
+            
+            const statusCheckResult = await campaignsService.checkAndUpdateCampaignStatus(campaign_id);
+            console.log("📊 Campaign status check result:", statusCheckResult);
+            
+            if (statusCheckResult.status === 'completed') {
+              console.log(`🎉 Campaign ${campaign_id} has been automatically marked as completed!`);
+            }
+          } catch (campaignCheckError) {
+            console.error("❌ Error checking campaign status:", campaignCheckError);
+            // Don't fail the webhook if campaign status check fails
+          }
+        }
+
+        // Update call job status
+        if (job_id) {
+          const { error: jobUpdateError } = await c.req.db
+            .from('call_jobs')
+            .update({
+              status: 'completed',
+              result: {
+                call_id: call.callId,
+                duration: callDuration,
+                summary: call.shortSummary || call.summary,
+                end_reason: call.endReason
+              },
+              updated_at: new Date().toISOString()
+            })
+            .eq('job_id', job_id);
+
+          if (jobUpdateError) {
+            console.error("❌ Error updating call job:", jobUpdateError);
+          } else {
+            console.log("✅ Successfully updated call job to completed status");
+          }
+        }
+      } catch (updateError) {
+        console.error("❌ Critical error updating campaign contact:", updateError);
+      }
+    } else {
+      console.log("ℹ️ No campaign data found - this may be a regular (non-campaign) call");
+    }
+
     // Create a promise that resolves when the operation is complete
     if(call && call.endReason !== 'unjoined'){
       try {
@@ -203,104 +377,46 @@ export async function finishCall(c: Context) {
         
         if(!response) {
           console.error("Background finishCall error: Missing response");
-          //get oout of if block
-          return;
+          // Continue with the rest of the process even if twilioService.finishCall fails
         }
 
-        let {userId , TimeTaken , callId} = response;
+        let userId = response?.userId || call?.metadata?.['user_id'] || call?.metadata?.['userId'];
+        let TimeTaken = response?.TimeTaken;
+        let callId = response?.callId || call?.callId;
 
-        console.log("Call ID to delete: ", callId , userId , TimeTaken);
+        console.log("💰 Processing pricing update:", { userId, TimeTaken, callId });
 
-        if(!userId || !callId) {
-          userId = call?.metadata?.['user_id'] || call?.metadata?.['userId'];
-          callId = call?.callId;
-        }
+        // Only update pricing if we have the necessary data
+        if(userId && TimeTaken && callId) {
+          try {
+            const timeInSeconds = Math.ceil(TimeTaken / 1000); // Convert ms to seconds
+            console.log("Updating pricing for user", userId, "reducing time by", timeInSeconds, "seconds");
 
-        // Update campaign contact if this is a campaign call
-        const campaign_id = call?.metadata?.['campaign_id'];
-        const contact_id = call?.metadata?.['contact_id'];
-        const job_id = call?.metadata?.['job_id'];
+            // Use Postgres decrement operation
+            const { data: pricing, error } = await c.req.db.rpc(
+                'decrement_time_rem',
+                { user_id_param: userId, seconds_to_subtract: timeInSeconds }
+            );
 
-        if (campaign_id && contact_id) {
-          console.log("Updating campaign contact:", { campaign_id, contact_id, callId });
-          
-          // Calculate call duration from joined to ended timestamps
-          let callDuration = 0;
-          if (call.joined && call.ended) {
-            const joinedTime = new Date(call.joined).getTime();
-            const endedTime = new Date(call.ended).getTime();
-            callDuration = Math.floor((endedTime - joinedTime) / 1000); // Duration in seconds
+            if(error){
+                console.error("❌ Error updating pricing:", error);
+            } else {
+              console.log("✅ Successfully updated pricing. New time_rem:", pricing);
+            }
+            
+            twilioService.deleteCall(callId);
+            console.log("🗑️ Call cleanup completed");
+          } catch (pricingError) {
+            console.error("❌ Pricing update failed but continuing:", pricingError);
           }
-
-          const updateData: any = {
-            call_status: 'completed',
-            completed_at: new Date().toISOString(),
-            call_duration: callDuration
-          };
-
-          // Add call summary if available
-          if (call.shortSummary) {
-            updateData.call_summary = call.shortSummary;
-          }
-          if (call.summary) {
-            updateData.call_notes = call.summary;
-          }
-
-          // Update the campaign contact
-          const { error: contactUpdateError } = await c.req.db
-            .from('call_campaign_contacts')
-            .update(updateData)
-            .eq('contact_id', contact_id);
-
-          if (contactUpdateError) {
-            console.error("Error updating campaign contact:", contactUpdateError);
-          } else {
-            console.log("Successfully updated campaign contact");
-          }
-
-          // Update call job status
-          if (job_id) {
-            await c.req.db
-              .from('call_jobs')
-              .update({
-                status: 'completed',
-                result: {
-                  call_id: callId,
-                  duration: callDuration,
-                  summary: call.shortSummary || call.summary,
-                  end_reason: call.endReason
-                },
-                updated_at: new Date().toISOString()
-              })
-              .eq('job_id', job_id);
+        } else {
+          console.log("⚠️ Skipping pricing update due to missing data:", { userId, TimeTaken, callId });
+          // Still try to clean up the call if we have the callId
+          if (callId) {
+            twilioService.deleteCall(callId);
+            console.log("🗑️ Call cleanup completed (without pricing update)");
           }
         }
-
-        if(!userId || !TimeTaken || !callId) {
-         console.error("Background finishCall error: Missing userId or TimeTaken");
-          return c.json({
-            status: 'error',
-            message: 'Internal Server Error',
-          }, 500);
-        }
-
-        const timeInSeconds = Math.ceil(TimeTaken / 1000); // Convert ms to seconds
-        console.log("Updating pricing for user", userId, "reducing time by", timeInSeconds, "seconds");
-
-        // Use Postgres decrement operation
-        const { data: pricing, error } = await c.req.db.rpc(
-            'decrement_time_rem',
-            { user_id_param: userId, seconds_to_subtract: timeInSeconds }
-        );
-
-        if(error){
-            console.error("Error updating pricing:", error);
-            throw new Error('Failed to update pricing');
-        }
-        console.log("Call deleted successfully", pricing);
-
-        console.log("Successfully updated pricing. New time_rem:", pricing);
-        twilioService.deleteCall(callId);
 
         
       } catch (error) {
