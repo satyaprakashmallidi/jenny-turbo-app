@@ -8,46 +8,44 @@ import { CampaignsService } from "../services/campaigns.service";
  * @param targetTimezone - IANA timezone string (e.g., "Asia/Kolkata")
  * @returns ISO string representing the correct UTC time
  */
-function convertToTargetTimezoneUTC(isoString: string, targetTimezone: string): string {
+function convertToTargetTimezoneUTC(datetimeString: string, targetTimezone: string): string {
   try {
-    // Parse the input date (which came from user's browser timezone)
-    const inputDate = new Date(isoString);
+    // The input is now a raw datetime string like "2025-08-21T15:30"
+    // We need to interpret this as being in the target timezone
     
-    // Extract the date/time components that the user intended
-    const year = inputDate.getFullYear();
-    const month = inputDate.getMonth(); // 0-indexed
-    const day = inputDate.getDate();
-    const hour = inputDate.getHours();
-    const minute = inputDate.getMinutes();
-    const second = inputDate.getSeconds();
+    // Parse the datetime components from the raw string
+    const [datePart, timePart] = datetimeString.includes('T') 
+      ? datetimeString.split('T') 
+      : [datetimeString.split(' ')[0], datetimeString.split(' ')[1] || '00:00'];
     
-    // Create a date representing this time in UTC
-    const utcDate = new Date(Date.UTC(year, month, day, hour, minute, second));
+    const [year, month, day] = datePart.split('-').map(Number);
+    const [hour, minute] = (timePart || '00:00').split(':').map(Number);
     
-    // Find what time this would show in the target timezone
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: targetTimezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    });
+    // Create a date in UTC representing this time
+    let testUTC = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
     
-    const timeInTarget = formatter.format(utcDate);
-    const parsedTargetTime = new Date(timeInTarget + '.000Z');
+    // Use iterative approach to find the correct UTC time
+    // that when displayed in target timezone shows the user's intended time
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const displayedTime = new Date(testUTC.toLocaleString("en-US", { 
+        timeZone: targetTimezone 
+      }));
+      
+      const targetTime = new Date(year, month - 1, day, hour, minute, 0);
+      const offsetMs = targetTime.getTime() - displayedTime.getTime();
+      
+      if (Math.abs(offsetMs) < 60000) { // Within 1 minute, good enough
+        break;
+      }
+      
+      testUTC = new Date(testUTC.getTime() + offsetMs);
+    }
     
-    // Calculate the offset and correct the UTC time
-    const offsetMs = utcDate.getTime() - parsedTargetTime.getTime();
-    const correctedUTC = new Date(utcDate.getTime() + offsetMs);
-    
-    return correctedUTC.toISOString();
+    return testUTC.toISOString();
   } catch (error) {
     console.error('Error converting timezone:', error);
-    // Fallback to original value if conversion fails
-    return isoString;
+    // Fallback: treat as UTC
+    return new Date(datetimeString + (datetimeString.includes('T') ? '' : 'T00:00:00') + '.000Z').toISOString();
   }
 }
 
