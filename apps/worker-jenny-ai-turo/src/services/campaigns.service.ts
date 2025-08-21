@@ -97,7 +97,7 @@ export class CampaignsService {
   /**
    * Queue all contacts in a campaign for calling
    */
-  async queueCampaignCalls(campaign_id: string): Promise<{ success: boolean; message: string; queued_count?: number; error?: string }> {
+  async queueCampaignCalls(campaign_id: string): Promise<{ success: boolean; message: string; queued_count?: number; error?: string; completed?: boolean }> {
     try {
       // Get campaign details
       const { data: campaignData, error: campaignError } = await this.db
@@ -137,6 +137,17 @@ export class CampaignsService {
       }
 
       if (!contactsData || contactsData.length === 0) {
+        console.log(`📋 No pending contacts found for campaign ${campaign_id}, checking if campaign should be completed...`);
+        
+        // If no pending contacts found, check if campaign should be marked as completed
+        const statusCheckResult = await this.checkAndUpdateCampaignStatus(campaign_id);
+        console.log(`🔍 Campaign status check result:`, statusCheckResult);
+        
+        if (statusCheckResult.status === 'completed') {
+          console.log(`✅ Campaign ${campaign_id} has been marked as completed!`);
+          return { success: true, message: 'Campaign completed - no pending contacts remaining', queued_count: 0, completed: true };
+        }
+        
         return { success: false, message: 'No pending contacts found' };
       }
 
@@ -419,6 +430,62 @@ export class CampaignsService {
   }
 
   /**
+   * Clean up stale "in_progress" calls that never received webhook updates
+   * Calls that are older than 10 minutes and still "in_progress" will be marked as failed
+   */
+  async cleanupStaleInProgressCalls(): Promise<void> {
+    try {
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      
+      console.log("🧹 Cleaning up stale in_progress calls older than 10 minutes...");
+      
+      const { data: staleCalls, error: selectError } = await this.db
+        .from('call_campaign_contacts')
+        .select('contact_id, campaign_id, contact_phone, created_at')
+        .eq('call_status', 'in_progress')
+        .lt('created_at', tenMinutesAgo);
+      
+      if (selectError) {
+        console.error('Error selecting stale calls:', selectError);
+        return;
+      }
+      
+      if (staleCalls && staleCalls.length > 0) {
+        console.log(`Found ${staleCalls.length} stale calls to clean up`);
+        
+        // Mark all stale calls as failed
+        const { error: updateError } = await this.db
+          .from('call_campaign_contacts')
+          .update({
+            call_status: 'failed',
+            completed_at: new Date().toISOString(),
+            call_notes: 'Call timed out - no webhook received',
+            updated_at: new Date().toISOString()
+          })
+          .eq('call_status', 'in_progress')
+          .lt('created_at', tenMinutesAgo);
+        
+        if (updateError) {
+          console.error('Error updating stale calls:', updateError);
+        } else {
+          console.log(`✅ Successfully marked ${staleCalls.length} stale calls as failed`);
+          
+          // Check campaign status for affected campaigns
+          const uniqueCampaignIds = [...new Set(staleCalls.map((call: any) => call.campaign_id))];
+          for (const campaignId of uniqueCampaignIds) {
+            console.log(`🔍 Checking campaign status after cleanup: ${campaignId}`);
+            await this.checkAndUpdateCampaignStatus(campaignId as string);
+          }
+        }
+      } else {
+        console.log("No stale calls found");
+      }
+    } catch (error) {
+      console.error('Error cleaning up stale calls:', error);
+    }
+  }
+
+  /**
    * Calculate next execution time for recurring campaigns
    */
   calculateNextExecution(campaign: any): Date | null {
@@ -460,7 +527,7 @@ export class CampaignsService {
   /**
    * Schedule next execution for recurring campaigns
    */
-  async scheduleNextExecution(campaign_id: string): Promise<{ success: boolean; message: string; next_execution?: string }> {
+  async scheduleNextExecution(campaign_id: string): Promise<{ success: boolean; message: string; next_execution?: string; error?: string }> {
     try {
       // Get campaign details
       const { data: campaignData, error: campaignError } = await this.db
@@ -670,6 +737,9 @@ export class CampaignsService {
    */
   async processScheduledCampaigns(): Promise<{ success: boolean; processed_count: number; errors: any[] }> {
     try {
+      // First, clean up any stale "in_progress" calls
+      await this.cleanupStaleInProgressCalls();
+      
       const scheduledCampaigns = await this.getScheduledCampaigns(10); // Process up to 10 campaigns at a time
       const errors: any[] = [];
       let processedCount = 0;

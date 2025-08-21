@@ -285,8 +285,27 @@ export async function finishCall(c: Context) {
         callDuration = Math.floor((endedTime - joinedTime) / 1000); // Duration in seconds
       }
 
+      // Determine call status based on call details and duration
+      let callStatus = 'completed';
+      
+      // If call duration is very short (less than 5 seconds), likely failed/no answer
+      if (callDuration < 5) {
+        callStatus = 'failed';
+        console.log("📞 Call duration very short, marking as failed");
+      }
+      // If call never joined but ended, it failed to connect
+      else if (!call.joined && call.ended) {
+        callStatus = 'failed';
+        console.log("📞 Call never joined but ended, marking as failed");
+      }
+      // If call has reasonable duration, mark as completed
+      else if (callDuration >= 5) {
+        callStatus = 'completed';
+        console.log("📞 Call had reasonable duration, marking as completed");
+      }
+
       const updateData: any = {
-        call_status: 'completed',
+        call_status: callStatus,
         completed_at: new Date().toISOString(),
         call_duration: callDuration
       };

@@ -429,6 +429,115 @@ app.route('/api/call-transcripts', callTranscriptsRoutes);
 
 app.post('/api/finish-call', finishCall);
 
+// Debug endpoint for campaign status
+app.get('/api/debug-campaign/:campaign_id', async (c) => {
+  try {
+    const campaign_id = c.req.param('campaign_id');
+    
+    if (!campaign_id) {
+      return c.json({ status: 'error', message: 'Missing campaign_id' }, 400);
+    }
+    
+    // Get campaign details
+    const { data: campaignData, error: campaignError } = await c.req.db
+      .from('call_campaigns')
+      .select('*')
+      .eq('campaign_id', campaign_id)
+      .single();
+    
+    if (campaignError || !campaignData) {
+      return c.json({ status: 'error', message: 'Campaign not found', error: campaignError?.message }, 404);
+    }
+    
+    // Get all contacts with their status
+    const { data: contactsData, error: contactsError } = await c.req.db
+      .from('call_campaign_contacts')
+      .select('contact_id, contact_phone, contact_name, call_status, call_duration, ultravox_call_id, completed_at, error_message')
+      .eq('campaign_id', campaign_id)
+      .order('created_at', { ascending: true });
+    
+    if (contactsError) {
+      return c.json({ status: 'error', message: 'Failed to fetch contacts', error: contactsError.message }, 500);
+    }
+    
+    // Count statuses
+    const statusCounts = {
+      pending: 0,
+      queued: 0,
+      in_progress: 0,
+      completed: 0,
+      failed: 0,
+      cancelled: 0
+    };
+    
+    contactsData?.forEach((contact: any) => {
+      const status = contact.call_status;
+      if (status in statusCounts) {
+        statusCounts[status as keyof typeof statusCounts]++;
+      }
+    });
+    
+    // Check if database trigger should have fired
+    const totalContacts = contactsData?.length || 0;
+    const pendingContacts = statusCounts.pending + statusCounts.queued + statusCounts.in_progress;
+    const shouldBeCompleted = pendingContacts === 0 && totalContacts > 0;
+    
+    return c.json({
+      status: 'success',
+      campaign: {
+        campaign_id: campaignData.campaign_id,
+        campaign_name: campaignData.campaign_name,
+        status: campaignData.status,
+        created_at: campaignData.created_at,
+        started_at: campaignData.started_at,
+        completed_at: campaignData.completed_at,
+        total_contacts: campaignData.total_contacts
+      },
+      contact_status_counts: statusCounts,
+      contacts: contactsData,
+      analysis: {
+        total_contacts: totalContacts,
+        pending_contacts: pendingContacts,
+        should_be_completed: shouldBeCompleted,
+        database_trigger_issue: shouldBeCompleted && campaignData.status !== 'completed',
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('Debug Campaign Error:', error);
+    return c.json({ status: 'error', message: 'Internal server error', error: error instanceof Error ? error.message : String(error) }, 500);
+  }
+});
+
+// Manual campaign status update endpoint
+app.post('/api/force-update-campaign/:campaign_id', async (c) => {
+  try {
+    const campaign_id = c.req.param('campaign_id');
+    
+    if (!campaign_id) {
+      return c.json({ status: 'error', message: 'Missing campaign_id' }, 400);
+    }
+    
+    const { CampaignsService } = await import('./services/campaigns.service');
+    const campaignsService = CampaignsService.getInstance();
+    campaignsService.setDependencies(c.req.db, c.req.env);
+    
+    const result = await campaignsService.checkAndUpdateCampaignStatus(campaign_id);
+    
+    return c.json({
+      status: 'success',
+      message: 'Campaign status check forced',
+      result: result,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Force Update Campaign Error:', error);
+    return c.json({ status: 'error', message: 'Internal server error', error: error instanceof Error ? error.message : String(error) }, 500);
+  }
+});
+
 // Lock management endpoints for debugging
 app.get('/api/check-lock', async (c) => {
   try {
@@ -1378,6 +1487,13 @@ export default {
         
         try {
           // Check time window before making the call
+          console.log(`🕐 Time window check for job ${job_id}:`, {
+            hasTimeWindow: !!payload.campaign_settings?.timeWindow,
+            timeWindow: payload.campaign_settings?.timeWindow,
+            timezone: payload.campaign_settings?.timezone || 'UTC',
+            currentTime: new Date().toISOString()
+          });
+          
           if (payload.campaign_settings?.timeWindow) {
             const { CampaignsService } = await import('./services/campaigns.service');
             const campaignsService = CampaignsService.getInstance();
@@ -1549,9 +1665,11 @@ export default {
             
             // Add minimum delay to prevent race conditions + exponential backoff
             const minDelayForRaceCondition = 3; // Minimum 3 seconds to prevent race conditions
-            const exponentialBackoff = baseDelay * Math.pow(1.5, retryCount);
-            const twilioDelay = Math.min(120, Math.max(minDelayForRaceCondition, exponentialBackoff));
+            const twilioBaseDelay = 5; // 5 seconds base delay for Twilio retries
+            const exponentialBackoff = twilioBaseDelay * Math.pow(1.3, retryCount); // Gentler exponential growth
+            const twilioDelay = Math.min(60, Math.max(minDelayForRaceCondition, exponentialBackoff)); // Max 60 seconds instead of 120
             console.log(`📞 Twilio numbers busy, retrying in ${twilioDelay}s (attempt ${retryCount + 1}/${maxRetries + 1}): ${errorMessage}`);
+            console.log(`🔧 Retry calculation: baseDelay=${twilioBaseDelay}, retryCount=${retryCount}, exponentialBackoff=${exponentialBackoff}, finalDelay=${twilioDelay}`);
             console.log(`Job ID: ${job_id}, Contact: ${payload.contact_phone || payload.toNumber}`);
             
             // Reset job status back to pending for retry
