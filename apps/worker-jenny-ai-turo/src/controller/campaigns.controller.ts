@@ -3,6 +3,55 @@ import { randomUUID } from "crypto";
 import { CampaignsService } from "../services/campaigns.service";
 
 /**
+ * Convert a datetime from user input to UTC, interpreting it as being in the target timezone
+ * @param isoString - ISO string from frontend (user's local time)
+ * @param targetTimezone - IANA timezone string (e.g., "Asia/Kolkata")
+ * @returns ISO string representing the correct UTC time
+ */
+function convertToTargetTimezoneUTC(isoString: string, targetTimezone: string): string {
+  try {
+    // Parse the input date (which came from user's browser timezone)
+    const inputDate = new Date(isoString);
+    
+    // Extract the date/time components that the user intended
+    const year = inputDate.getFullYear();
+    const month = inputDate.getMonth(); // 0-indexed
+    const day = inputDate.getDate();
+    const hour = inputDate.getHours();
+    const minute = inputDate.getMinutes();
+    const second = inputDate.getSeconds();
+    
+    // Create a date representing this time in UTC
+    const utcDate = new Date(Date.UTC(year, month, day, hour, minute, second));
+    
+    // Find what time this would show in the target timezone
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: targetTimezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+    
+    const timeInTarget = formatter.format(utcDate);
+    const parsedTargetTime = new Date(timeInTarget + '.000Z');
+    
+    // Calculate the offset and correct the UTC time
+    const offsetMs = utcDate.getTime() - parsedTargetTime.getTime();
+    const correctedUTC = new Date(utcDate.getTime() + offsetMs);
+    
+    return correctedUTC.toISOString();
+  } catch (error) {
+    console.error('Error converting timezone:', error);
+    // Fallback to original value if conversion fails
+    return isoString;
+  }
+}
+
+/**
  * POST /campaigns
  * Body: { campaign_name, bot_id, bot_name, twilio_phone_number, system_prompt, voice_settings, field_mappings, contacts, notes?, scheduling? }
  * Returns: { campaign_id, status }
@@ -59,7 +108,18 @@ export async function createCampaign(c: Context) {
 
     // Add scheduling fields if provided
     if (scheduling) {
-      campaignData.scheduled_start_time = scheduling.scheduled_start_time;
+      // Convert the scheduled time from the selected timezone to UTC
+      // The frontend sends the time as entered by the user (in their browser's timezone)
+      // but we need to interpret it as if it were in the selected timezone
+      if (scheduling.scheduled_start_time && scheduling.timezone) {
+        campaignData.scheduled_start_time = convertToTargetTimezoneUTC(
+          scheduling.scheduled_start_time, 
+          scheduling.timezone
+        );
+      } else {
+        campaignData.scheduled_start_time = scheduling.scheduled_start_time;
+      }
+      
       campaignData.timezone = scheduling.timezone || "UTC";
       campaignData.is_recurring = scheduling.is_recurring || false;
       campaignData.auto_start = scheduling.auto_start || false;
