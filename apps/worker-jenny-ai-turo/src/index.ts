@@ -13,6 +13,7 @@ import { TwilioService } from './services/twilio.service';
 import { CallTranscriptsService } from './services/call-transcripts.service';
 import queuedCallsRoutes from './routes/queued-calls.routes';
 import campaignsRoutes from './routes/campaigns.routes';
+import webhooksRoutes from './routes/webhooks.routes';
 //@ts-ignore
 import { env } from 'hono';
 
@@ -426,6 +427,7 @@ app.route('/api/tools', toolRoutes);
 app.route('/api/knowledgebase', corpusRoutes);
 app.route('/api/single-twilio', singleTwilioRoutes);
 app.route('/api/call-transcripts', callTranscriptsRoutes);
+app.route('/api/webhooks', webhooksRoutes);
 
 app.post('/api/finish-call', finishCall);
 
