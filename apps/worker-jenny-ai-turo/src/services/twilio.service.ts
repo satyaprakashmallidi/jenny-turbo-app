@@ -35,6 +35,12 @@ enum ParameterLocation {
     BODY = "PARAMETER_LOCATION_BODY",
   }
 
+enum KnownParamEnum {
+    UNSPECIFIED = "KNOWN_PARAM_UNSPECIFIED",
+    CALL_ID = "KNOWN_PARAM_CALL_ID",
+    CONVERSATION_HISTORY = "KNOWN_PARAM_CONVERSATION_HISTORY",
+  }
+
 export class TwilioService {
     private static instance: TwilioService;
     private supabaseClient: SupabaseClient | null = null;
@@ -453,10 +459,10 @@ export class TwilioService {
             selectedTwilioNumber = twilioFromNumber;
         }
 
-        // Get bot details
+        // Get bot details including realtime capture settings
             const { data: bot, error: botError } = await supabase
                 .from('bots')
-                .select('voice, system_prompt , is_call_transfer_allowed , call_transfer_number')
+                .select('voice, system_prompt , is_call_transfer_allowed , call_transfer_number, is_realtime_capture_enabled, realtime_capture_fields')
                 .eq('id', botId)
                 .eq('user_id', userId)
                 .single();
@@ -594,6 +600,54 @@ export class TwilioService {
                 enableFunctionInsertion: true,
             }
         };
+
+        // Add realtime capture tool if bot has it enabled
+        if (bot.is_realtime_capture_enabled && bot.realtime_capture_fields) {
+            const realtimeCaptureFields = bot.realtime_capture_fields as any[];
+            
+            // Generate dynamic parameters for the captureOutcome tool
+            const dynamicParameters = realtimeCaptureFields.map(field => ({
+                name: field.name,
+                location: ParameterLocation.BODY,
+                schema: field.type === 'text' 
+                    ? { type: "string", description: field.description }
+                    : field.type === 'number'
+                    ? { type: "number", description: field.description }
+                    : field.type === 'boolean'
+                    ? { type: "boolean", description: field.description }
+                    : field.type === 'enum'
+                    ? { type: "string", enum: field.enum_values, description: field.description }
+                    : { type: "string", description: field.description },
+                required: field.required
+            }));
+
+            const captureOutcomeTool: SelectedTool = {
+                temporaryTool: {
+                    modelToolName: "captureOutcome",
+                    description: "Capture data in real-time during conversation based on configured fields",
+                    dynamicParameters: dynamicParameters,
+                    automaticParameters: [
+                        {
+                            name: "callId",
+                            location: ParameterLocation.BODY,
+                            knownValue: KnownParamEnum.CALL_ID
+                        }
+                    ],
+                    http: {
+                        baseUrlPattern: "https://jenny-ai-turo.everyai-com.workers.dev/api/capture-outcome",
+                        httpMethod: "POST"
+                    }
+                }
+            };
+
+            // Add the tool to the callConfig
+            if (!callConfig.selectedTools) {
+                callConfig.selectedTools = [];
+            }
+            callConfig.selectedTools.push(captureOutcomeTool);
+            
+            console.log("Added realtime capture tool with fields:", realtimeCaptureFields.map(f => f.name));
+        }
 
         if(!callConfig.metadata){
             callConfig.metadata = {};

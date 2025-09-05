@@ -153,44 +153,42 @@ export async function finishCall(c: Context) {
     console.log( "Event", event , "Call", call);
     console.log("📋 Call metadata received:", call?.metadata);
     
-    if(event && call){
+    // if(event && call){
+    //   console.log("inside event call");
+    //   // we only subscribed to event = call.ended let's see
+    //   const callDetails : CallDetails = {
+    //     call_id: call.callId,
+    //     created: call.created,
+    //     joined: call.joined,
+    //     ended: call.ended,
+    //     end_reason: call.endReason,
+    //     recording_enabled: call.recordingEnabled,
+    //     join_timeout: call.joinTimeout,
+    //     max_duration: call.maxDuration,
+    //     voice: call.voice,
+    //     temperature: call.temperature,
+    //     time_exceeded_message: call.timeExceededMessage,
+    //     short_summary: call.shortSummary,
+    //     long_summary: call.summary,
+    //     system_prompt: call.systemPrompt,
+    //   };
 
-      console.log("inside event call");
-      // we only subscribed to event = call.ended let's see
-      const callDetails : CallDetails = {
-        call_id: call.callId,
-        created: call.created,
-        joined: call.joined,
-        ended: call.ended,
-        end_reason: call.endReason,
-        recording_enabled: call.recordingEnabled,
-        join_timeout: call.joinTimeout,
-        max_duration: call.maxDuration,
-        voice: call.voice,
-        temperature: call.temperature,
-        time_exceeded_message: call.timeExceededMessage,
-        short_summary: call.shortSummary,
-        long_summary: call.summary,
-        system_prompt: call.systemPrompt,
-      };
+    //   //importing the call Details to our db
+    //   console.log("Importing call details to db", callDetails);
+    //   const { data , error } = await c.req.db
+    //     .from('call_details')
+    //     .upsert([callDetails] , {
+    //       onConflict: 'call_id'
+    //     });
 
-      //importing the call Details to our db
-      console.log("Importing call details to db", callDetails);
-      const { data , error } = await c.req.db
-        .from('call_details')
-        .upsert([callDetails] , {
-          onConflict: 'call_id'
-        });
-
-      if(error){
-          console.error("Error importing call details to db", error);
-          return c.json({
-            status: 'error',
-            message: 'Failed to import call details to db',
-            error: error instanceof Error ? error.message : 'Unknown error',
-          }, 500);
-        }
-    }
+    //   if(error){
+    //       console.error("❌ Database error importing call details:", error);
+    //       console.error("❌ Call details data:", JSON.stringify(callDetails, null, 2));
+    //       console.error("❌ Error details:", JSON.stringify(error, null, 2));
+    //   } else {
+    //       console.log("✅ Successfully imported call details to db");
+    //   }
+    // }
     
     const twilioService = TwilioService.getInstance();
     twilioService.setDependencies(c.req.db, c.req.env);
@@ -204,74 +202,74 @@ export async function finishCall(c: Context) {
     console.log("📋 Full metadata received:", JSON.stringify(call?.metadata));
 
     // Fallback: Try to find campaign information from call_jobs table if not in metadata
-    if (!campaign_id || !contact_id) {
-      console.log("🔄 Campaign metadata missing, attempting database lookup...");
-      try {
-        // First try to find by ultravox_call_id
-        let jobData = null;
-        let jobError = null;
+    // if (!campaign_id || !contact_id) {
+    //   console.log("🔄 Campaign metadata missing, attempting database lookup...");
+    //   try {
+    //     // First try to find by ultravox_call_id
+    //     let jobData = null;
+    //     let jobError = null;
         
-        const { data: jobByCallId, error: errorByCallId } = await c.req.db
-          .from('call_jobs')
-          .select('campaign_id, contact_id, job_id, payload')
-          .eq('ultravox_call_id', call.callId)
-          .single();
+    //     const { data: jobByCallId, error: errorByCallId } = await c.req.db
+    //       .from('call_jobs')
+    //       .select('campaign_id, contact_id, job_id, payload')
+    //       .eq('ultravox_call_id', call.callId)
+    //       .single();
         
-        if (!errorByCallId && jobByCallId) {
-          jobData = jobByCallId;
-          console.log("✅ Found job by ultravox_call_id");
-        } else if (job_id) {
-          // If not found by call_id but we have job_id, try that
-          console.log("🔄 Trying to find job by job_id:", job_id);
-          const { data: jobByJobId, error: errorByJobId } = await c.req.db
-            .from('call_jobs')
-            .select('campaign_id, contact_id, job_id, payload')
-            .eq('job_id', job_id)
-            .single();
+    //     if (!errorByCallId && jobByCallId) {
+    //       jobData = jobByCallId;
+    //       console.log("✅ Found job by ultravox_call_id");
+    //     } else if (job_id) {
+    //       // If not found by call_id but we have job_id, try that
+    //       console.log("🔄 Trying to find job by job_id:", job_id);
+    //       const { data: jobByJobId, error: errorByJobId } = await c.req.db
+    //         .from('call_jobs')
+    //         .select('campaign_id, contact_id, job_id, payload')
+    //         .eq('job_id', job_id)
+    //         .single();
           
-          if (!errorByJobId && jobByJobId) {
-            jobData = jobByJobId;
-            console.log("✅ Found job by job_id");
-          } else {
-            jobError = errorByJobId;
-          }
-        } else {
-          // Last resort: check call_campaign_contacts table directly using call_id
-          console.log("🔄 Trying to find contact by ultravox_call_id in call_campaign_contacts:");
-          const { data: contactByCallId, error: errorContactByCallId } = await c.req.db
-            .from('call_campaign_contacts')
-            .select('campaign_id, contact_id')
-            .eq('ultravox_call_id', call.callId)
-            .single();
+    //       if (!errorByJobId && jobByJobId) {
+    //         jobData = jobByJobId;
+    //         console.log("✅ Found job by job_id");
+    //       } else {
+    //         jobError = errorByJobId;
+    //       }
+    //     } else {
+    //       // Last resort: check call_campaign_contacts table directly using call_id
+    //       console.log("🔄 Trying to find contact by ultravox_call_id in call_campaign_contacts:");
+    //       const { data: contactByCallId, error: errorContactByCallId } = await c.req.db
+    //         .from('call_campaign_contacts')
+    //         .select('campaign_id, contact_id')
+    //         .eq('ultravox_call_id', call.callId)
+    //         .single();
           
-          if (!errorContactByCallId && contactByCallId) {
-            campaign_id = contactByCallId.campaign_id;
-            contact_id = contactByCallId.contact_id;
-            console.log("✅ Found campaign data from call_campaign_contacts table");
-          } else {
-            console.log("❌ No matching contact found in call_campaign_contacts:", errorContactByCallId?.message);
-          }
-        }
+    //       if (!errorContactByCallId && contactByCallId) {
+    //         campaign_id = contactByCallId.campaign_id;
+    //         contact_id = contactByCallId.contact_id;
+    //         console.log("✅ Found campaign data from call_campaign_contacts table");
+    //       } else {
+    //         console.log("❌ No matching contact found in call_campaign_contacts:", errorContactByCallId?.message);
+    //       }
+    //     }
 
-        if (jobData) {
-          campaign_id = campaign_id || jobData.campaign_id;
-          contact_id = contact_id || jobData.contact_id;
-          job_id = job_id || jobData.job_id;
+    //     if (jobData) {
+    //       campaign_id = campaign_id || jobData.campaign_id;
+    //       contact_id = contact_id || jobData.contact_id;
+    //       job_id = job_id || jobData.job_id;
           
-          // Also check the payload for campaign metadata
-          if (jobData.payload) {
-            campaign_id = campaign_id || jobData.payload.campaign_id;
-            contact_id = contact_id || jobData.payload.contact_id;
-          }
+    //       // Also check the payload for campaign metadata
+    //       if (jobData.payload) {
+    //         campaign_id = campaign_id || jobData.payload.campaign_id;
+    //         contact_id = contact_id || jobData.payload.contact_id;
+    //       }
           
-          console.log("✅ Found campaign data from database:", { campaign_id, contact_id, job_id });
-        } else if (!campaign_id || !contact_id) {
-          console.log("❌ No matching job found in database:", jobError?.message);
-        }
-      } catch (dbError) {
-        console.error("❌ Database lookup failed:", dbError);
-      }
-    }
+    //       console.log("✅ Found campaign data from database:", { campaign_id, contact_id, job_id });
+    //     } else if (!campaign_id || !contact_id) {
+    //       console.log("❌ No matching job found in database:", jobError?.message);
+    //     }
+    //   } catch (dbError) {
+    //     console.error("❌ Database lookup failed:", dbError);
+    //   }
+    // }
 
     // Update campaign contact status BEFORE pricing operations
     if (campaign_id && contact_id) {
@@ -290,11 +288,11 @@ export async function finishCall(c: Context) {
       
       // If call duration is very short (less than 5 seconds), likely failed/no answer
       if (!call.joined && call.ended) {
-        callStatus = 'failed';
+        callStatus = 'unjoined';
         console.log("📞 Call never joined but ended, marking as failed");
       }
       // If call has reasonable duration, mark as completed
-      else if (callDuration >= 5) {
+      else if (callDuration) {
         callStatus = 'completed';
         console.log("📞 Call had reasonable duration, marking as completed");
       }

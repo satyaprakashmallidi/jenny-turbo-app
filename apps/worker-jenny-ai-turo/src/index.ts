@@ -163,6 +163,47 @@ app.get('/api/inbound', async (c) => {
     });
   }
 
+  // Add realtime data capture tool if enabled and configured
+  const isRealtimeCaptureEnabled = bot?.is_realtime_capture_enabled || false;
+  const realtimeCaptureFields = bot?.realtime_capture_fields || [];
+  
+  if (isRealtimeCaptureEnabled && realtimeCaptureFields.length > 0) {
+    const dynamicParameters = realtimeCaptureFields.map((field: any) => {
+      const parameter = {
+        name: field.name,
+        location: "PARAMETER_LOCATION_BODY" as const,
+        schema: {
+          type: field.type === "text" ? "string" : 
+                field.type === "number" ? "number" : 
+                field.type === "boolean" ? "boolean" : 
+                "string",
+          description: field.description,
+          ...(field.type === "enum" && field.enum_values && field.enum_values.length > 0 
+            ? { enum: field.enum_values } 
+            : {})
+        },
+        required: field.required || false
+      };
+      
+      return parameter;
+    });
+
+    const captureOutcomeTool = {
+      toolName: "captureOutcome",
+      temporaryTool: {
+        modelToolName: "captureOutcome",
+        description: "Capture data in real-time during conversation based on configured fields",
+        dynamicParameters: dynamicParameters,
+        http: {
+          baseUrlPattern: "https://jenny-ai-turo.everyai-com.workers.dev/api/capture-outcome",
+          httpMethod: "POST"
+        }
+      }
+    };
+
+    tools.push(captureOutcomeTool);
+  }
+
   const callConfig: CallConfig = {
     voice,
     temperature: temperature>0 ? Number(`0.${temperature}`) : 0,
@@ -772,7 +813,89 @@ app.get('/api/mind-dost', async (c) => {
       error: error,
     }, 500);
   }
-})
+});
+
+app.post('/api/capture-outcome', async (c) => {
+  try {
+    const body = await c.req.json();
+    console.log("Capturing Outcome", body);
+    
+    // Extract call ID from request headers or body
+    let callId = c.req.header('X-Call-ID') || body.callId;
+    
+    if (!callId) {
+      console.error("No call ID provided for capture outcome");
+      return c.json({
+        status: 'error',
+        message: 'Call ID is required',
+      }, 400);
+    }
+    
+    // Save captured data to call_records
+    try {
+      // Remove callId from body to avoid duplication
+      const { callId: _, ...capturedData } = body;
+      
+      const { data: existingRecord, error: fetchError } = await c.req.db
+        .from('call_records')
+        .select('additional_data')
+        .eq('call_id', callId)
+        .single();
+        
+      if (fetchError) {
+        console.error("Error fetching existing call record:", fetchError);
+        return c.json({
+          status: 'error',
+          message: 'Failed to find call record',
+        }, 500);
+      }
+      
+      // Merge existing additional_data with captured data
+      const updatedAdditionalData = {
+        ...existingRecord.additional_data,
+        captured_data: capturedData,
+        capture_timestamp: new Date().toISOString()
+      };
+      
+      const { error: updateError } = await c.req.db
+        .from('call_records')
+        .update({ 
+          additional_data: updatedAdditionalData,
+        })
+        .eq('call_id', callId);
+        
+      if (updateError) {
+        console.error("Error updating call record with captured data:", updateError);
+        return c.json({
+          status: 'error',
+          message: 'Failed to save captured data',
+        }, 500);
+      }
+      
+      console.log("Successfully saved captured data to call_records for call:", callId);
+      console.log("Captured data:", capturedData);
+      
+    } catch (dbError) {
+      console.error("Database error while saving captured data:", dbError);
+      return c.json({
+        status: 'error', 
+        message: 'Database error occurred',
+      }, 500);
+    }
+    
+    return c.json({
+      status: 'success',
+      message: 'Outcome captured and saved successfully',
+    });
+  } catch (error) {
+    console.error("Capturing Outcome Error:", error);
+    return c.json({
+      status: 'error',
+      message: 'Internal Server Error',
+      error: error,
+    }, 500);
+  }
+});
 
 app.post('/api/ultravox/createcall', async (c) => {
   try {
@@ -786,9 +909,9 @@ app.post('/api/ultravox/createcall', async (c) => {
       }, 500);
     }
 
-    if(!body?.firstSpeaker){
-      body.firstSpeaker = "FIRST_SPEAKER_USER";
-    }
+    // if(!body?.firstSpeaker){
+    //   body.firstSpeaker = "FIRST_SPEAKER_USER";
+    // }
 
     if(!body?.experimentalSettings){
       body.experimentalSettings = {
@@ -798,6 +921,59 @@ app.post('/api/ultravox/createcall', async (c) => {
       }
     }
 
+    body.selectedTools = body.selectedTools || [];
+    
+    // Add realtime capture tool if bot has it enabled
+    if (body.metadata?.botId) {
+      const { data: botData, error } = await c.req.db
+        .from('bots')
+        .select('is_realtime_capture_enabled, realtime_capture_fields')
+        .eq('id', body.metadata?.botId)
+        .single();
+
+      if (!error && botData?.is_realtime_capture_enabled && botData?.realtime_capture_fields) {
+        const realtimeCaptureFields = botData.realtime_capture_fields as any[];
+        
+        // Generate dynamic parameters for the captureOutcome tool
+        const dynamicParameters = realtimeCaptureFields.map(field => ({
+          name: field.name,
+          location: "PARAMETER_LOCATION_BODY",
+          schema: field.type === 'text' 
+            ? { type: "string", description: field.description }
+            : field.type === 'number'
+            ? { type: "number", description: field.description }
+            : field.type === 'boolean'
+            ? { type: "boolean", description: field.description }
+            : field.type === 'enum'
+            ? { type: "string", enum: field.enum_values, description: field.description }
+            : { type: "string", description: field.description },
+          required: field.required
+        }));
+
+        const captureOutcomeTool = {
+          temporaryTool: {
+            modelToolName: "captureOutcome",
+            description: "Capture data in real-time during conversation based on configured fields",
+            dynamicParameters: dynamicParameters,
+            automaticParameters: [
+              {
+                name: "callId",
+                location: "PARAMETER_LOCATION_BODY",
+                knownValue: "KNOWN_PARAM_CALL_ID"
+              }
+            ],
+            http: {
+              baseUrlPattern: "https://2d0b9fe78cf6.ngrok-free.app/api/capture-outcome",
+              httpMethod: "POST"
+            }
+          }
+        };
+
+        // Add the tool to the body
+        body.selectedTools.push(captureOutcomeTool);
+      }
+    }
+    
     const response = await fetch('https://api.ultravox.ai/api/calls', {
       method: 'POST',
       headers: {
