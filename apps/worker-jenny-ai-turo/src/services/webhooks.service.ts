@@ -1,10 +1,8 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Env } from '../config/env';
-import { 
-  UltravoxWebhook, 
-  CreateWebhookRequest, 
-  UpdateWebhookRequest, 
-  WebhookListResponse,
+import {
+  CreateWebhookRequest,
+  UpdateWebhookRequest,
   DatabaseWebhook,
   WebhookEvent
 } from '../types/webhooks';
@@ -34,90 +32,58 @@ export class WebhooksService {
     }
   }
 
-  async listWebhooks(userId: string, agentId?: string): Promise<WebhookListResponse> {
+  async listWebhooks(userId: string, agentId?: string): Promise<DatabaseWebhook[]> {
     this.validateDependencies();
 
     try {
-      // Build query params
-      const params = new URLSearchParams();
+      let query = this.supabase!
+        .from('ultravox_webhooks')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      // Filter by agent if provided
       if (agentId) {
-        params.append('agentId', agentId);
-      }
-      params.append('pageSize', '100'); // Get more webhooks per page
-
-      // Call Ultravox API
-      const response = await fetch(
-        `${this.env!.ULTRAVOX_API_URL}/webhooks?${params.toString()}`,
-        {
-          method: 'GET',
-          headers: {
-            'X-API-Key': this.env!.ULTRAVOX_API_KEY,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch webhooks: ${response.statusText}`);
+        query = query.or(`agent_id.eq.${agentId},agent_id.is.null`);
       }
 
-      const data = await response.json() as WebhookListResponse;
+      const { data, error } = await query;
 
-      // Sync with database
-      if (data.results && data.results.length > 0) {
-        for (const webhook of data.results) {
-          await this.syncWebhookToDatabase(webhook, userId);
-        }
+      if (error) {
+        throw error;
       }
 
-      return data;
+      return data || [];
     } catch (error) {
       console.error('Error listing webhooks:', error);
       throw error;
     }
   }
 
-  async getWebhook(webhookId: string, userId: string): Promise<UltravoxWebhook> {
+  async getWebhook(webhookId: string, userId: string): Promise<DatabaseWebhook> {
     this.validateDependencies();
 
     try {
-      // First check if it's in our database
-      const { data: dbWebhook } = await this.supabase!
+      // Get webhook directly from our database
+      const { data, error } = await this.supabase!
         .from('ultravox_webhooks')
         .select('*')
-        .eq('ultravox_webhook_id', webhookId)
+        .eq('webhook_id', webhookId)
         .eq('user_id', userId)
         .single();
 
-      // Call Ultravox API
-      const response = await fetch(
-        `${this.env!.ULTRAVOX_API_URL}/webhooks/${webhookId}`,
-        {
-          method: 'GET',
-          headers: {
-            'X-API-Key': this.env!.ULTRAVOX_API_KEY,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch webhook: ${response.statusText}`);
+      if (error) {
+        throw error;
       }
 
-      const webhook = await response.json() as UltravoxWebhook;
-
-      // Sync with database
-      await this.syncWebhookToDatabase(webhook, userId);
-
-      return webhook;
+      return data;
     } catch (error) {
       console.error('Error getting webhook:', error);
       throw error;
     }
   }
 
-  async createWebhook(request: CreateWebhookRequest, userId: string): Promise<UltravoxWebhook> {
+  async createWebhook(request: CreateWebhookRequest, userId: string): Promise<DatabaseWebhook> {
     this.validateDependencies();
 
     try {
@@ -126,64 +92,69 @@ export class WebhooksService {
         request.secrets = [this.generateWebhookSecret()];
       }
 
-      // Call Ultravox API
-      const response = await fetch(
-        `${this.env!.ULTRAVOX_API_URL}/webhooks`,
-        {
-          method: 'POST',
-          headers: {
-            'X-API-Key': this.env!.ULTRAVOX_API_KEY,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(request),
-        }
-      );
+      // Generate a unique webhook ID for our system
+      const webhookId = `wh_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to create webhook: ${errorText}`);
+      // Create webhook directly in our database
+      const dbWebhook: Partial<DatabaseWebhook> = {
+        webhook_id: webhookId,
+        user_id: userId,
+        ultravox_webhook_id: null, // Not using Ultravox anymore
+        url: request.url,
+        events: request.events,
+        agent_id: request.agentId || null,
+        status: 'normal',
+        last_status_change: new Date().toISOString(),
+        secret_key: request.secrets[0],
+        recent_failures: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      const { data, error } = await this.supabase!
+        .from('ultravox_webhooks')
+        .insert(dbWebhook)
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
       }
 
-      const webhook = await response.json() as UltravoxWebhook;
-
-      // Save to database
-      await this.saveWebhookToDatabase(webhook, userId, request.secrets[0]);
-
-      return webhook;
+      return data;
     } catch (error) {
       console.error('Error creating webhook:', error);
       throw error;
     }
   }
 
-  async updateWebhook(webhookId: string, request: UpdateWebhookRequest, userId: string): Promise<UltravoxWebhook> {
+  async updateWebhook(webhookId: string, request: UpdateWebhookRequest, userId: string): Promise<DatabaseWebhook> {
     this.validateDependencies();
 
     try {
-      // Call Ultravox API
-      const response = await fetch(
-        `${this.env!.ULTRAVOX_API_URL}/webhooks/${webhookId}`,
-        {
-          method: 'PATCH',
-          headers: {
-            'X-API-Key': this.env!.ULTRAVOX_API_KEY,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(request),
-        }
-      );
+      // Update webhook directly in our database
+      const updates: Partial<DatabaseWebhook> = {
+        updated_at: new Date().toISOString()
+      };
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to update webhook: ${errorText}`);
+      if (request.url) updates.url = request.url;
+      if (request.events) updates.events = request.events;
+      if (request.agentId !== undefined) updates.agent_id = request.agentId;
+      if (request.secrets && request.secrets.length > 0) updates.secret_key = request.secrets[0];
+
+      const { data, error } = await this.supabase!
+        .from('ultravox_webhooks')
+        .update(updates)
+        .eq('webhook_id', webhookId)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
       }
 
-      const webhook = await response.json() as UltravoxWebhook;
-
-      // Update in database
-      await this.updateWebhookInDatabase(webhook, userId);
-
-      return webhook;
+      return data;
     } catch (error) {
       console.error('Error updating webhook:', error);
       throw error;
@@ -194,99 +165,18 @@ export class WebhooksService {
     this.validateDependencies();
 
     try {
-      // Call Ultravox API
-      const response = await fetch(
-        `${this.env!.ULTRAVOX_API_URL}/webhooks/${webhookId}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'X-API-Key': this.env!.ULTRAVOX_API_KEY,
-          },
-        }
-      );
-
-      if (!response.ok && response.status !== 204) {
-        throw new Error(`Failed to delete webhook: ${response.statusText}`);
-      }
-
-      // Delete from database
-      await this.supabase!
+      // Delete webhook directly from our database
+      const { error } = await this.supabase!
         .from('ultravox_webhooks')
         .delete()
-        .eq('ultravox_webhook_id', webhookId)
+        .eq('webhook_id', webhookId)
         .eq('user_id', userId);
 
+      if (error) {
+        throw error;
+      }
     } catch (error) {
       console.error('Error deleting webhook:', error);
-      throw error;
-    }
-  }
-
-  private async syncWebhookToDatabase(webhook: UltravoxWebhook, userId: string): Promise<void> {
-    try {
-      const dbWebhook: Partial<DatabaseWebhook> = {
-        user_id: userId,
-        ultravox_webhook_id: webhook.webhookId,
-        url: webhook.url,
-        events: webhook.events,
-        agent_id: webhook.agentId || null,
-        status: webhook.status,
-        last_status_change: webhook.lastStatusChange,
-        recent_failures: webhook.recentFailures || [],
-      };
-
-      await this.supabase!
-        .from('ultravox_webhooks')
-        .upsert(dbWebhook, {
-          onConflict: 'ultravox_webhook_id',
-        });
-    } catch (error) {
-      console.error('Error syncing webhook to database:', error);
-    }
-  }
-
-  private async saveWebhookToDatabase(webhook: UltravoxWebhook, userId: string, secretKey?: string): Promise<void> {
-    try {
-      const dbWebhook: Partial<DatabaseWebhook> = {
-        user_id: userId,
-        ultravox_webhook_id: webhook.webhookId,
-        url: webhook.url,
-        events: webhook.events,
-        agent_id: webhook.agentId || null,
-        status: webhook.status,
-        last_status_change: webhook.lastStatusChange,
-        secret_key: secretKey || null,
-        recent_failures: webhook.recentFailures || [],
-      };
-
-      await this.supabase!
-        .from('ultravox_webhooks')
-        .insert(dbWebhook);
-    } catch (error) {
-      console.error('Error saving webhook to database:', error);
-      throw error;
-    }
-  }
-
-  private async updateWebhookInDatabase(webhook: UltravoxWebhook, userId: string): Promise<void> {
-    try {
-      const updates: Partial<DatabaseWebhook> = {
-        url: webhook.url,
-        events: webhook.events,
-        agent_id: webhook.agentId || null,
-        status: webhook.status,
-        last_status_change: webhook.lastStatusChange,
-        recent_failures: webhook.recentFailures || [],
-        updated_at: new Date().toISOString(),
-      };
-
-      await this.supabase!
-        .from('ultravox_webhooks')
-        .update(updates)
-        .eq('ultravox_webhook_id', webhook.webhookId)
-        .eq('user_id', userId);
-    } catch (error) {
-      console.error('Error updating webhook in database:', error);
       throw error;
     }
   }
@@ -321,19 +211,19 @@ export class WebhooksService {
     }
   }
 
-  async getUserCreatedWebhooks(agentId?: string): Promise<UltravoxWebhook[]> {
+  async getUserCreatedWebhooks(userId: string, agentId?: string): Promise<DatabaseWebhook[]> {
     this.validateDependencies();
 
     try {
       let query = this.supabase!
         .from('ultravox_webhooks')
         .select('*')
-        .not('ultravox_webhook_id', 'is', null) // Only webhooks that have Ultravox IDs (created through UI)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
       // Filter by agent if provided
       if (agentId) {
-        query = query.eq('agent_id', agentId);
+        query = query.or(`agent_id.eq.${agentId},agent_id.is.null`);
       }
 
       const { data, error } = await query;
@@ -342,23 +232,119 @@ export class WebhooksService {
         throw error;
       }
 
-      // Convert database webhooks to Ultravox format
-      const webhooks: UltravoxWebhook[] = (data || []).map(dbWebhook => ({
-        webhookId: dbWebhook.ultravox_webhook_id!,
-        created: dbWebhook.created_at,
-        url: dbWebhook.url,
-        events: dbWebhook.events as WebhookEvent[],
-        status: dbWebhook.status as 'normal' | 'unhealthy',
-        lastStatusChange: dbWebhook.last_status_change,
-        recentFailures: dbWebhook.recent_failures || [],
-        agentId: dbWebhook.agent_id,
-        secrets: dbWebhook.secret_key ? [dbWebhook.secret_key] : undefined,
-      }));
-
-      return webhooks;
+      return data || [];
     } catch (error) {
       console.error('Error fetching user created webhooks:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get user webhooks that should be notified for a specific event
+   */
+  async getUserWebhooksForEvent(userId: string, event: WebhookEvent, agentId?: string): Promise<DatabaseWebhook[]> {
+    this.validateDependencies();
+
+    try {
+      let query = this.supabase!
+        .from('ultravox_webhooks')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'normal') // Only active webhooks
+        .contains('events', [event]); // Webhooks that listen for this event
+
+      // Filter by agent if provided
+      if (agentId) {
+        query = query.or(`agent_id.eq.${agentId},agent_id.is.null`); // Include specific agent or global webhooks
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        throw error;
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error(`Error fetching user webhooks for event ${event}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Send webhook notification to multiple URLs with Promise.all
+   */
+  async notifyWebhooks(webhooks: DatabaseWebhook[], payload: any): Promise<{ success: number; failed: number; results: any[] }> {
+    if (!webhooks || webhooks.length === 0) {
+      return { success: 0, failed: 0, results: [] };
+    }
+
+    console.log(`🔔 Sending webhook notifications to ${webhooks.length} webhook(s)`);
+
+    const webhookPromises = webhooks.map(async (webhook) => {
+      try {
+        console.log(`📤 Sending webhook to: ${webhook.url}`);
+
+        const headers: HeadersInit = {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Jenny-AI/1.0 (Webhook)',
+        };
+
+        // Add signature if webhook has a secret
+        if (webhook.secret_key) {
+          // Simple HMAC-like signature (could be enhanced with crypto)
+          const signature = `sha256=${webhook.secret_key}`;
+          headers['X-Jenny-Signature'] = signature;
+        }
+
+        const response = await fetch(webhook.url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+          // Add timeout to prevent hanging
+          signal: AbortSignal.timeout(10000), // 10 second timeout
+        });
+
+        if (response.ok) {
+          console.log(`✅ Webhook sent successfully to: ${webhook.url} (${response.status})`);
+          return {
+            success: true,
+            webhookId: webhook.webhook_id,
+            url: webhook.url,
+            status: response.status
+          };
+        } else {
+          console.error(`❌ Webhook failed for: ${webhook.url} (${response.status})`);
+          return {
+            success: false,
+            webhookId: webhook.webhook_id,
+            url: webhook.url,
+            status: response.status,
+            error: `HTTP ${response.status}: ${response.statusText}`
+          };
+        }
+      } catch (error) {
+        console.error(`❌ Webhook error for: ${webhook.url}`, error);
+        return {
+          success: false,
+          webhookId: webhook.webhook_id,
+          url: webhook.url,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        };
+      }
+    });
+
+    try {
+      const results = await Promise.all(webhookPromises);
+      const success = results.filter(r => r.success).length;
+      const failed = results.filter(r => !r.success).length;
+
+      console.log(`🔔 Webhook notifications completed: ${success} success, ${failed} failed`);
+
+      return { success, failed, results };
+    } catch (error) {
+      console.error('❌ Error in webhook notification Promise.all:', error);
+      return { success: 0, failed: webhooks.length, results: [] };
     }
   }
 }

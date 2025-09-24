@@ -95,7 +95,7 @@ export class CampaignsService {
   }
 
   /**
-   * Queue all contacts in a campaign for calling
+   * Queue contacts in a campaign for calling - with smart number locking
    */
   async queueCampaignCalls(campaign_id: string): Promise<{ success: boolean; message: string; queued_count?: number; error?: string; completed?: boolean }> {
     try {
@@ -110,21 +110,39 @@ export class CampaignsService {
         return { success: false, message: 'Campaign not found', error: campaignError?.message };
       }
 
-      console.log("camamamam data", campaignData);
+      console.log("📞 Campaign data:", {
+        campaign_id: campaignData.campaign_id,
+        campaign_name: campaignData.campaign_name,
+        twilio_numbers: campaignData.twilio_phone_numbers,
+        number_locking: campaignData.campaign_settings?.enableNumberLocking
+      });
 
+      // Check if number locking is enabled and we have multiple numbers
+      const isNumberLocked = campaignData.campaign_settings?.enableNumberLocking ||
+                           (campaignData.twilio_phone_numbers && campaignData.twilio_phone_numbers.length > 1);
 
-      // Get pending contacts
+      const availableNumbers = campaignData.twilio_phone_numbers?.length || 1;
+      const maxContactsToQueue = isNumberLocked ? availableNumbers : 100; // Limit to available numbers if locked, otherwise use reasonable batch
+
+      console.log(`🔒 Number locking status: ${isNumberLocked ? 'ENABLED' : 'DISABLED'}`);
+      console.log(`📞 Available Twilio numbers: ${availableNumbers}`);
+      console.log(`📊 Max contacts to queue initially: ${maxContactsToQueue}`);
+
+      // Get pending contacts (limited if number locking is enabled)
       const { data: contactsData, error: contactsError } = await this.db
         .from('call_campaign_contacts')
         .select('*')
         .eq('campaign_id', campaign_id)
-        .eq('call_status', 'pending');
+        .eq('call_status', 'pending')
+        .limit(maxContactsToQueue);
 
-      console.log("📋 Contacts found for queueing:", {
+      console.log("📋 Contacts found for initial queueing:", {
         campaign_id,
         total_contacts_in_campaign: campaignData.total_contacts,
         pending_contacts_found: contactsData?.length || 0,
-        contact_details: contactsData?.map(c => ({
+        will_queue: Math.min(contactsData?.length || 0, maxContactsToQueue),
+        number_locking_enabled: isNumberLocked,
+        contact_details: contactsData?.map((c: any) => ({
           contact_id: c.contact_id,
           contact_phone: c.contact_phone,
           contact_name: c.contact_name,
@@ -151,13 +169,14 @@ export class CampaignsService {
         return { success: false, message: 'No pending contacts found' };
       }
 
-      // Queue calls for each contact
+      // Queue calls for each contact (limited by maxContactsToQueue if number locking is enabled)
       let queuedCount = 0;
-      console.log(`🔄 Starting to process ${contactsData.length} contacts for queueing...`);
-      
-      for (const contact of contactsData) {
+      const contactsToQueue = isNumberLocked ? contactsData.slice(0, maxContactsToQueue) : contactsData;
+      console.log(`🔄 Starting to process ${contactsToQueue.length} contacts for initial queueing (out of ${contactsData.length} pending)...`);
+
+      for (const contact of contactsToQueue) {
         try {
-          console.log(`📞 Processing contact ${queuedCount + 1}/${contactsData.length}:`, {
+          console.log(`📞 Processing contact ${queuedCount + 1}/${contactsToQueue.length}:`, {
             contact_id: contact.contact_id,
             contact_phone: contact.contact_phone,
             contact_name: contact.contact_name
@@ -290,16 +309,22 @@ export class CampaignsService {
           }
 
           queuedCount++;
-          console.log(`✅ Contact ${queuedCount}/${contactsData.length} completed successfully`);
+          console.log(`✅ Contact ${queuedCount}/${contactsToQueue.length} completed successfully`);
         } catch (error) {
           console.error('❌ Error queueing contact:', contact.contact_id, error);
         }
       }
 
-      return { 
-        success: true, 
-        message: `Successfully queued ${queuedCount} calls`, 
-        queued_count: queuedCount 
+      // Log remaining contacts if number locking is enabled
+      if (isNumberLocked && contactsData.length > contactsToQueue.length) {
+        const remainingContacts = contactsData.length - contactsToQueue.length;
+        console.log(`⏳ ${remainingContacts} contacts remain pending and will be queued as numbers become available`);
+      }
+
+      return {
+        success: true,
+        message: `Successfully queued ${queuedCount} calls${isNumberLocked ? ` (${contactsData.length - queuedCount} pending)` : ''}`,
+        queued_count: queuedCount
       };
 
     } catch (error) {
@@ -309,6 +334,198 @@ export class CampaignsService {
         message: 'Failed to queue campaign calls', 
         error: error instanceof Error ? error.message : String(error) 
       };
+    }
+  }
+
+  /**
+   * Get the next pending contact from a campaign
+   */
+  async getNextPendingContact(campaign_id: string): Promise<any> {
+    try {
+      const { data, error } = await this.db
+        .from('call_campaign_contacts')
+        .select('*')
+        .eq('campaign_id', campaign_id)
+        .eq('call_status', 'pending')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .single();
+
+      if (error || !data) {
+        console.log(`📋 No more pending contacts for campaign ${campaign_id}`);
+        return null;
+      }
+
+      console.log(`📞 Found next pending contact:`, {
+        contact_id: data.contact_id,
+        contact_phone: data.contact_phone,
+        contact_name: data.contact_name
+      });
+
+      return data;
+    } catch (error) {
+      console.error('Error getting next pending contact:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Queue a single contact for calling
+   */
+  async queueSingleContact(campaign_id: string, contact: any): Promise<{ success: boolean; message: string; job_id?: string }> {
+    try {
+      // Get campaign details
+      const { data: campaignData, error: campaignError } = await this.db
+        .from('call_campaigns')
+        .select('*')
+        .eq('campaign_id', campaign_id)
+        .single();
+
+      if (campaignError || !campaignData) {
+        return { success: false, message: 'Campaign not found' };
+      }
+
+      const job_id = randomUUID();
+      console.log(`🆔 Queueing single contact with job_id: ${job_id}`);
+
+      // Create call job record
+      const { error: jobError } = await this.db
+        .from('call_jobs')
+        .insert([{
+          job_id,
+          campaign_id,
+          contact_id: contact.contact_id,
+          user_id: campaignData.user_id,
+          status: 'pending',
+          payload: {
+            campaign_id,
+            contact_id: contact.contact_id,
+            contact_phone: contact.contact_phone,
+            contact_name: contact.contact_name,
+            contact_data: contact.contact_data,
+            bot_id: campaignData.bot_id,
+            bot_name: campaignData.bot_name,
+            twilio_phone_number: campaignData.twilio_phone_number,
+            twilio_phone_numbers: campaignData.twilio_phone_numbers,
+            system_prompt: campaignData.system_prompt,
+            voice_settings: campaignData.voice_settings,
+            field_mappings: campaignData.field_mappings,
+            user_id: campaignData.user_id,
+            campaign_settings: campaignData.campaign_settings || {}
+          }
+        }]);
+
+      if (jobError) {
+        console.error('❌ Failed to create job for contact:', contact.contact_id, jobError);
+        return { success: false, message: 'Failed to create job' };
+      }
+
+      // Update contact status to queued
+      const { error: updateError } = await this.db
+        .from('call_campaign_contacts')
+        .update({
+          call_status: 'queued',
+          job_id,
+          queued_at: new Date().toISOString()
+        })
+        .eq('contact_id', contact.contact_id);
+
+      if (updateError) {
+        console.error('❌ Failed to update contact status to queued:', contact.contact_id, updateError);
+        return { success: false, message: 'Failed to update contact status' };
+      }
+
+      // Queue the job
+      if (this.env.calls_que) {
+        // Process system prompt with field mappings
+        let processedSystemPrompt = campaignData.system_prompt;
+        if (campaignData.field_mappings && contact.contact_data) {
+          Object.entries(campaignData.field_mappings).forEach(([placeholder, fieldName]) => {
+            const value = contact.contact_data[fieldName as string] || '';
+            const pattern = `\\<\\<\\<${placeholder}\\>\\>\\>`;
+            processedSystemPrompt = processedSystemPrompt.replace(
+              new RegExp(pattern, 'g'),
+              value
+            );
+          });
+        }
+
+        // Create call configuration
+        const callConfig = {
+          voice: campaignData.voice_settings?.voice || "d17917ec-fd98-4c50-8c83-052c575cbf3e",
+          temperature: campaignData.voice_settings?.temperature || 0.6,
+          joinTimeout: "30s",
+          maxDuration: "300s",
+          recordingEnabled: true,
+          timeExceededMessage: "I'm sorry, I can't help you with that.",
+          systemPrompt: processedSystemPrompt,
+          medium: { twilio: {} },
+          metadata: {
+            bot_id: campaignData.bot_id,
+            user_id: campaignData.user_id,
+            campaign_id,
+            contact_id: contact.contact_id,
+            job_id
+          },
+          selectedTools: [
+            { toolName: "hangUp" },
+            { toolName: "leaveVoicemail" }
+          ]
+        };
+
+        await this.env.calls_que.send({
+          job_id,
+          payload: {
+            callConfig,
+            botId: campaignData.bot_id,
+            userId: campaignData.user_id,
+            tools: callConfig.selectedTools,
+            twilioFromNumber: campaignData.twilio_phone_number,
+            twilio_phone_numbers: campaignData.twilio_phone_numbers,
+            toNumber: contact.contact_phone,
+            customerName: contact.contact_name || 'Customer',
+            campaign_id,
+            contact_id: contact.contact_id,
+            campaign_settings: {
+              ...campaignData.campaign_settings,
+              enableNumberLocking: campaignData.twilio_phone_numbers?.length > 1 ? true : (campaignData.campaign_settings?.enableNumberLocking || false)
+            }
+          }
+        });
+
+        console.log(`🚀 Successfully queued single contact: ${contact.contact_phone}`);
+        return { success: true, message: 'Contact queued successfully', job_id };
+      } else {
+        console.error('❌ Queue not available');
+        return { success: false, message: 'Queue not available' };
+      }
+    } catch (error) {
+      console.error('Error queueing single contact:', error);
+      return { success: false, message: 'Failed to queue contact' };
+    }
+  }
+
+  /**
+   * Check if a campaign has number locking enabled
+   */
+  async isNumberLockedCampaign(campaign_id: string): Promise<boolean> {
+    try {
+      const { data, error } = await this.db
+        .from('call_campaigns')
+        .select('campaign_settings, twilio_phone_numbers')
+        .eq('campaign_id', campaign_id)
+        .single();
+
+      if (error || !data) {
+        return false;
+      }
+
+      // Number locking is enabled if explicitly set or if multiple numbers are available
+      return data.campaign_settings?.enableNumberLocking ||
+             (data.twilio_phone_numbers && data.twilio_phone_numbers.length > 1);
+    } catch (error) {
+      console.error('Error checking number lock status:', error);
+      return false;
     }
   }
 
@@ -324,7 +541,7 @@ export class CampaignsService {
     // 3. Make the call via TwilioService
     // 4. Update contact with call ID
     // 5. Handle errors and update status accordingly
-    
+
     console.log('processCampaignCall called - actual processing handled by queue processor');
     return { success: true, call_id: 'handled_by_queue' };
   }
@@ -380,7 +597,7 @@ export class CampaignsService {
         .select();
 
       if (error) {
-        return { success: false, message: 'Failed to cancel calls', error: error.message };
+        return { success: false, message: 'Failed to cancel calls' };
       }
 
       const cancelledCount = data?.length || 0;
@@ -393,10 +610,9 @@ export class CampaignsService {
 
     } catch (error) {
       console.error('Cancel Campaign Calls Error:', error);
-      return { 
-        success: false, 
-        message: 'Failed to cancel campaign calls', 
-        error: error instanceof Error ? error.message : String(error) 
+      return {
+        success: false,
+        message: 'Failed to cancel campaign calls'
       };
     }
   }
