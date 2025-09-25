@@ -60,6 +60,7 @@ export interface CalendarAccount {
     toolId?: string;
     toolName?: string;
     temporaryTool?: BaseToolDefinition;
+
     nameOverride?: string;
     authTokens?: { [key: string]: string };
     parameterOverrides?: { [key: string]: any };
@@ -68,6 +69,7 @@ export interface CalendarAccount {
   export interface BaseToolDefinition {
     modelToolName?: string;
     description: string;
+    timeout?:string;
     dynamicParameters?: DynamicParameter[];
     staticParameters?: StaticParameter[];
     automaticParameters?: AutomaticParameter[];

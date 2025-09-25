@@ -1181,6 +1181,7 @@ export class TwilioService {
             }
 
             const jenny_url = "https://app.magicteams.ai";
+            // const jenny_url = "https://069b090b16dc.ngrok-free.app"
 
             if(!appointmentData || appointmentData.length === 0 || errorAppointmentTool){
                 throw new Error('Failed to fetch appointment tool');
@@ -1464,31 +1465,94 @@ export class TwilioService {
                     temporaryTool: {
                         modelToolName: "bookAppointment",
                         timeout: "10s",
-                        description: `Book an appointment using GoHighLevel. The current date is ${new Date().toDateString()}.
+                        description: `Book an appointment using GoHighLevel. Current date: ${new Date().toDateString()}, Current year: ${new Date().getFullYear()}.
 
-APPOINTMENT TYPE: ${appointmentTypes[0]?.name || 'go high level '} (${appointmentDuration} minutes)
+🚨 CRITICAL: DO NOT CALL THIS API UNTIL YOU HAVE ALL REQUIRED INFORMATION 🚨
+
+REQUIRED INFORMATION (MUST COLLECT ALL BEFORE CALLING API):
+1. ✅ First Name (ask explicitly, NEVER assume)
+2. ✅ Last Name (ask explicitly, NEVER assume)
+3. ✅ Email Address (ask explicitly, must be valid email format)
+4. ✅ Date (ask explicitly, handle relative dates like "tomorrow")
+5. ✅ Time (ask explicitly from valid slots: ${timeSlots})
+6. ✅ Timezone (ask explicitly, NEVER assume - this is mandatory)
+
+CRITICAL TIMEZONE HANDLING:
+- ALWAYS ask "What timezone are you in?" before making API call
+- Do NOT assume any timezone, even for Indian users
+- Do NOT use "unknown" values - explicitly collect timezone information
+- If user doesn't provide timezone, ask again: "I need your timezone to book the appointment correctly. Are you in IST, EST, PST, or another timezone?"
+- Only proceed when user explicitly provides their timezone
+
+DATE PARSING RULES:
+- Handle relative dates intelligently:
+  * "today" → current date (${new Date().toISOString().split('T')[0]})
+  * "tomorrow" → next day
+  * "day after tomorrow" → day after next
+  * "next Monday/Tuesday/etc." → next occurrence of that day
+- Always convert to YYYY-MM-DD format for API
+- Current year is ${new Date().getFullYear()} - use this for dates without year
+
+INFORMATION COLLECTION RULES:
+- NEVER use placeholder values like "unknown", "test", "placeholder"
+- NEVER call the API with missing information
+- If ANY field is missing, ASK for it explicitly before proceeding
+- Collect information step by step in a conversational manner
+- ALWAYS confirm all details before making the API call
+
+MANDATORY CONVERSATION FLOW:
+1. Ask for first name
+2. Ask for last name
+3. Ask for email address
+4. Ask for preferred date (handle "tomorrow", etc.)
+5. Ask for preferred time from available slots
+6. Ask for timezone (CRITICAL - never skip this)
+7. Confirm all details
+8. ONLY THEN call the API
+
+APPOINTMENT TYPE: ${appointmentTypes[0]?.name || 'go high level'} (${appointmentDuration} minutes)
 
 BUSINESS HOURS (MUST VALIDATE BEFORE BOOKING):
 ${businessHoursValidation}
 
-CRITICAL VALIDATION REQUIREMENTS:
-1. **Day Validation**: Check if the requested day is open (not CLOSED)
-2. **Time Validation**: Ensure the time is within business hours for that day
-3. **Time Slot Validation**: GHL only accepts ${appointmentDuration}-minute intervals
-   - Valid slots: ${timeSlots}
-   - If user requests 11:15, 11:45, etc., ask them to choose from valid slots
+TIMEZONE REQUIREMENTS:
+- Accept common formats and convert to IANA:
+  * IST → Asia/Kolkata (DEFAULT fallback if user confirms IST)
+  * EST/EDT → America/New_York
+  * PST/PDT → America/Los_Angeles
+  * CST/CDT → America/Chicago
+  * MST/MDT → America/Denver
+  * GMT/UTC → UTC
+- If user provides unclear timezone, ask for clarification
 
-BEFORE CALLING THE API:
-- Validate the day is not closed
-- Validate the time is within business hours
-- Validate the time follows the ${appointmentDuration}-minute interval
-- If ANY validation fails, explain the constraint and ask for a different time
-- DO NOT call the API if validation fails
+VALIDATION REQUIREMENTS:
+1. **Information Validation**: Verify ALL fields have real values
+2. **Timezone Validation**: Must be explicitly collected from user
+3. **Date Validation**: Parse relative dates, ensure not in past
+4. **Time Validation**: Must be from available slots and within business hours
+5. **Day Validation**: Check if requested day is open (not CLOSED)
+
+PRE-CALL CHECKLIST (ALL MUST BE ✅):
+☐ First name explicitly collected
+☐ Last name explicitly collected
+☐ Valid email format collected
+☐ Date parsed and validated (not in past)
+☐ Time selected from available slots
+☐ Timezone explicitly collected from user (NEVER assumed)
+☐ Day is open (not CLOSED)
+☐ Time is within business hours
+
+⚠️ CRITICAL: DO NOT CALL API IF ANY CHECKLIST ITEM IS MISSING
+
+API CALLING RULES:
+- Call API ONLY when ALL information is collected and validated
+- If API fails, collect corrected information before retry
+- Maximum 2 retries with corrected data
+- Use Asia/Kolkata as fallback only if user confirms IST timezone
 
 RESPONSE HANDLING:
-- On success: Confirm the appointment details immediately
-- On failure: Check the error message and guide the user accordingly
-- Never retry more than twice for the same booking`,
+- On success: Confirm appointment details with user
+- On failure: Identify missing/incorrect information and collect it before retry`,
                         dynamicParameters: [
                             {
                                 name: "appointmentDetails",
@@ -1499,7 +1563,7 @@ RESPONSE HANDLING:
                                         date: {
                                             type: "string",
                                             format: "YYYY-MM-DD",
-                                            description: `The appointment date. Current year is ${new Date().getFullYear()}. MUST validate this against business hours.`
+                                            description: `The appointment date in YYYY-MM-DD format. Current year is ${new Date().getFullYear()}. Handle relative dates: "today" = ${new Date().toISOString().split('T')[0]}, "tomorrow" = next day, "day after tomorrow" = day after next. Always convert relative dates to YYYY-MM-DD format. MUST validate against business hours.`
                                         },
                                         time: {
                                             type: "string",
@@ -1508,7 +1572,7 @@ RESPONSE HANDLING:
                                         },
                                         timezone: {
                                             type: "string",
-                                            description: "Timezone in IANA format (e.g., 'America/New_York', 'Asia/Kolkata'). Convert user-provided timezones to IANA format."
+                                            description: "Timezone in IANA format (e.g., 'America/New_York', 'Asia/Kolkata'). CRITICAL: Must be explicitly collected from user - never assume. Convert common formats: IST → Asia/Kolkata, EST → America/New_York, PST → America/Los_Angeles, etc. If user is unclear, ask for clarification."
                                         },
                                         firstName: {
                                             type: "string",
@@ -1525,7 +1589,7 @@ RESPONSE HANDLING:
                                         },
                                         appointmentType: {
                                             type: "string",
-                                            description: `The appointment type. Use: ${appointmentTypes[0]?.name || 'go high level'}`,
+                                            description: `The appointment type. Use: ${appointmentTypes[0]?.name || 'go high level'} of duration ${appointmentDuration}` ,
                                             default: appointmentTypes[0]?.name || 'go high level'
                                         },
                                         appointmentDuration: {
