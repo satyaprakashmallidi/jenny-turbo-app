@@ -1270,3 +1270,106 @@ Please respond with valid JSON only, no additional text.`;
     return c.json({ error: "Internal server error" }, 500);
   }
 }
+
+/**
+ * POST /campaigns/:campaign_id/convert-queued-to-not-answered
+ * Converts all queued contacts in a campaign to "unjoined" (unjoined) status
+ * Returns: { status, converted_count, message }
+ */
+export async function convertQueuedToNotAnswered(c: Context) {
+  try {
+    const campaign_id = c.req.param("campaign_id");
+
+    if (!campaign_id) {
+      return c.json({
+        status: "error",
+        message: "Missing campaign_id"
+      }, 400);
+    }
+
+    const db = c.req.db;
+
+    // First, get all queued contacts for this campaign
+    const { data: queuedContacts, error: fetchError } = await db
+      .from("call_campaign_contacts")
+      .select("contact_id, call_status")
+      .eq("campaign_id", campaign_id)
+      .eq("call_status", "queued");
+
+
+    if (fetchError) {
+      console.error("Error fetching queued contacts:", fetchError);
+      return c.json({
+        status: "error",
+        message: "Failed to fetch queued contacts",
+        error: fetchError.message
+      }, 500);
+    }
+
+    if (!queuedContacts || queuedContacts.length === 0) {
+      return c.json({
+        status: "success",
+        converted_count: 0,
+        message: "No queued contacts found for this campaign"
+      });
+    }
+
+    // Update all queued contacts to unjoined status
+    const { data: updatedContacts, error: updateError } = await db
+      .from("call_campaign_contacts")
+      .update({
+        call_status: "unjoined",
+        updated_at: new Date().toISOString(),
+        error_message: "Manually converted from queued to unjoined"
+      })
+      .eq("campaign_id", campaign_id)
+      .eq("call_status", "queued")
+      .select();
+
+    if (updateError) {
+      console.error("Error updating contacts:", updateError);
+      return c.json({
+        status: "error",
+        message: "Failed to update contacts",
+        error: updateError.message
+      }, 500);
+    }
+
+    // Update campaign stats if needed
+    const { data: statusCounts } = await db
+      .from("call_campaign_contacts")
+      .select("call_status")
+      .eq("campaign_id", campaign_id);
+
+    const counts = statusCounts?.reduce((acc: any, contact: any) => {
+      acc[contact.call_status] = (acc[contact.call_status] || 0) + 1;
+      return acc;
+    }, {}) || {};
+
+    // Update campaign with new counts
+    await db
+      .from("call_campaigns")
+      .update({
+        not_answered_contacts: counts.unjoined || 0,
+        queued_contacts: counts.queued || 0,
+        updated_at: new Date().toISOString()
+      })
+      .eq("campaign_id", campaign_id);
+
+    console.log(`✅ Converted ${updatedContacts?.length || 0} queued contacts to unjoined for campaign: ${campaign_id}`);
+
+    return c.json({
+      status: "success",
+      converted_count: updatedContacts?.length || 0,
+      message: `Successfully converted ${updatedContacts?.length || 0} queued contacts to unjoined status`
+    });
+
+  } catch (error) {
+    console.error("Error in convertQueuedToNotAnswered:", error);
+    return c.json({
+      status: "error",
+      message: "Internal server error",
+      error: error instanceof Error ? error.message : error
+    }, 500);
+  }
+}

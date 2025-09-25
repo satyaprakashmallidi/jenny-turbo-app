@@ -1,22 +1,24 @@
 import { Hono } from "hono";
-import { 
-  createCampaign, 
-  getCampaigns, 
-  getCampaign, 
-  startCampaign, 
-  stopCampaign, 
+import {
+  createCampaign,
+  getCampaigns,
+  getCampaign,
+  startCampaign,
+  stopCampaign,
   updateContact,
   deleteCampaign,
   getCampaignStats,
   updateCampaignSchedule,
   getScheduledCampaigns,
   createCampaignExecution,
-  processCallAnswers
+  processCallAnswers,
+  convertQueuedToNotAnswered
 } from "../controller/campaigns.controller";
 import { CampaignsService } from "../services/campaigns.service";
 import { Env } from "../config/env";
 
 const campaignsRoutes = new Hono<{ Bindings: Env }>();
+campaignsRoutes.post("/:campaign_id/convert-queued-to-not-answered", convertQueuedToNotAnswered);
 
 // Campaign management endpoints
 campaignsRoutes.post("/", createCampaign);
