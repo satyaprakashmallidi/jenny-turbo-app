@@ -853,7 +853,10 @@ app.post('/api/capture-outcome', async (c) => {
       // Merge existing additional_data with captured data
       const updatedAdditionalData = {
         ...existingRecord.additional_data,
-        captured_data: capturedData,
+        captured_data: {
+          ...(existingRecord.additional_data?.captured_data || {}),
+          ...capturedData
+        },
         capture_timestamp: new Date().toISOString()
       };
       
@@ -1584,6 +1587,9 @@ export default {
       console.log(`Processing queue message for job_id: ${job_id}, contact: ${payload.contact_phone || payload.toNumber}`);
       console.log(`Campaign settings:`, payload.campaign_settings);
       console.log(`Twilio numbers available:`, payload.twilio_phone_numbers);
+      console.log(`🔒 Number locking enabled:`, payload.campaign_settings?.enableNumberLocking || false);
+      console.log(`📞 Campaign ID:`, payload.campaign_id);
+      console.log(`👤 Contact ID:`, payload.contact_id);
       
       // Properly initialize Supabase client for queue context
       const processedEnv = getEnv(env);
@@ -1618,7 +1624,7 @@ export default {
           console.log('Could not retrieve retry count, defaulting to 0');
           retryCount = 0;
         }
-        const maxRetries = 10;
+        const maxRetries = 100;
         
         if (retryCount >= maxRetries) {
           console.log(`❌ Job ${job_id} exceeded max retries (${maxRetries}), marking as failed`);
@@ -1735,8 +1741,9 @@ export default {
             contact_id: payload.contact_id,
             metadata_in_callConfig: payload.callConfig.metadata
           });
-          console.log("Number locking enabled:", payload.campaign_settings?.enableNumberLocking);
-          console.log("Time window check:", payload.campaign_settings?.timeWindow ? "Passed" : "Not configured");
+          console.log("🔒 Number locking enabled:", payload.campaign_settings?.enableNumberLocking || false);
+          console.log("📞 Available Twilio numbers:", payload.twilio_phone_numbers?.length || 1);
+          console.log("⏰ Time window check:", payload.campaign_settings?.timeWindow ? "Passed" : "Not configured");
           
           const result = await twilioService.makeCall({ 
             ...payload, 

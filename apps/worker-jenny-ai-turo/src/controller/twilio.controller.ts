@@ -338,10 +338,34 @@ export async function finishCall(c: Context) {
             const { CampaignsService } = await import('../services/campaigns.service');
             const campaignsService = CampaignsService.getInstance();
             campaignsService.setDependencies(c.req.db, c.req.env);
-            
+
+            // First check if this is a number-locked campaign
+            const isNumberLocked = await campaignsService.isNumberLockedCampaign(campaign_id);
+            console.log(`🔒 Campaign number locking: ${isNumberLocked ? 'ENABLED' : 'DISABLED'}`);
+
+            if (isNumberLocked) {
+              // Try to queue the next contact if number locking is enabled
+              console.log(`🔄 Number-locked campaign detected. Checking for next contact to queue...`);
+              const nextContact = await campaignsService.getNextPendingContact(campaign_id);
+
+              if (nextContact) {
+                console.log(`📞 Queueing next contact: ${nextContact.contact_phone}`);
+                const queueResult = await campaignsService.queueSingleContact(campaign_id, nextContact);
+
+                if (queueResult.success) {
+                  console.log(`✅ Successfully queued next contact: ${nextContact.contact_phone} (job_id: ${queueResult.job_id})`);
+                } else {
+                  console.error(`❌ Failed to queue next contact: ${queueResult.message}`);
+                }
+              } else {
+                console.log(`📋 No more pending contacts for campaign ${campaign_id}`);
+              }
+            }
+
+            // Now check if campaign should be marked as completed
             const statusCheckResult = await campaignsService.checkAndUpdateCampaignStatus(campaign_id);
             console.log("📊 Campaign status check result:", statusCheckResult);
-            
+
             if (statusCheckResult.status === 'completed') {
               console.log(`🎉 Campaign ${campaign_id} has been automatically marked as completed!`);
             }
@@ -378,6 +402,88 @@ export async function finishCall(c: Context) {
       }
     } else {
       console.log("ℹ️ No campaign data found - this may be a regular (non-campaign) call");
+    }
+
+    // Notify user webhooks before finishing the call
+    try {
+      let userId = call?.metadata?.['user_id'] || call?.metadata?.['userId'];
+      let botId = call?.metadata?.['bot_id'];
+
+      if (userId) {
+        console.log(`🔔 Checking for user webhooks to notify for call.ended event (user: ${userId})`);
+
+        // Import and initialize webhooks service
+        const { WebhooksService } = await import('../services/webhooks.service');
+        const webhooksService = WebhooksService.getInstance();
+        webhooksService.setDependencies(c.req.db, c.req.env);
+
+        // Get user webhooks that listen for 'call.ended' events
+        const webhooks = await webhooksService.getUserWebhooksForEvent(userId, 'call.ended', botId);
+
+        if (webhooks.length > 0) {
+          console.log(`📤 Found ${webhooks.length} webhook(s) to notify`);
+
+          // Calculate call duration if available
+          let callDuration = 0;
+          if (call.joined && call.ended) {
+            const joinedTime = new Date(call.joined).getTime();
+            const endedTime = new Date(call.ended).getTime();
+            callDuration = Math.floor((endedTime - joinedTime) / 1000); // Duration in seconds
+          }
+
+          // Prepare webhook payload with comprehensive call information
+          const webhookPayload = {
+            event: 'call.ended',
+            timestamp: new Date().toISOString(),
+            call: {
+              callId: call.callId,
+              created: call.created,
+              joined: call.joined,
+              ended: call.ended,
+              endReason: call.endReason,
+              duration: callDuration, // Duration in seconds
+              shortSummary: call.shortSummary,
+              summary: call.summary,
+              recordingEnabled: call.recordingEnabled,
+              joinTimeout: call.joinTimeout,
+              maxDuration: call.maxDuration,
+              voice: call.voice,
+              temperature: call.temperature,
+              timeExceededMessage: call.timeExceededMessage,
+              systemPrompt: call.systemPrompt,
+              metadata: call.metadata
+            },
+            user: {
+              userId: userId,
+              botId: botId
+            },
+            // Add campaign information if available (for campaign calls)
+            ...(campaign_id && {
+              campaign: {
+                campaign_id,
+                contact_id,
+                job_id
+              }
+            })
+          };
+
+          // Send webhooks in parallel (non-blocking)
+          webhooksService.notifyWebhooks(webhooks, webhookPayload)
+            .then(result => {
+              console.log(`🔔 Webhook notifications result: ${result.success} success, ${result.failed} failed`);
+            })
+            .catch(error => {
+              console.error('❌ Error sending webhook notifications:', error);
+            });
+        } else {
+          console.log(`📭 No webhooks found for user ${userId} with 'call.ended' event`);
+        }
+      } else {
+        console.log('⚠️ No user ID found in call metadata, skipping webhook notifications');
+      }
+    } catch (webhookError) {
+      console.error('❌ Error processing webhook notifications:', webhookError);
+      // Continue with the rest of the function even if webhook notifications fail
     }
 
     // Create a promise that resolves when the operation is complete

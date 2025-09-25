@@ -67,6 +67,11 @@ export class TwilioService {
         return TwilioService.instance;
     }
 
+    // Helper function to ensure consistent number normalization for locking
+    private normalizeNumberForLocking(phoneNumber: string): string {
+        return phoneNumber.replaceAll("+", "").replaceAll(" ", "").replaceAll("-", "");
+    }
+
     public setDependencies(supabase: SupabaseClient, env: Env) {
         this.supabaseClient = supabase;
         this.env = env;
@@ -395,7 +400,7 @@ export class TwilioService {
             // Try each Twilio number with atomic check-and-lock to prevent race conditions
             for (const rawNumber of orderedNumbers) {
                 // Normalize number for locking (remove formatting)
-                const normalizedNumber = rawNumber.replaceAll("+", "").replaceAll(" ", "").replaceAll("-", "");
+                const normalizedNumber = this.normalizeNumberForLocking(rawNumber);
                 const twilioLockKey = `locked_twilio:${normalizedNumber}`;
                 
                 // Check if number is locked
@@ -404,7 +409,7 @@ export class TwilioService {
                 if (!isTwilioLocked) {
                     // Try to lock it immediately with a unique identifier to detect conflicts
                     const lockId = `${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-                    await env.ACTIVE_CALLS.put(twilioLockKey, lockId, { expirationTtl: 600 }); // 10 minutes max lock time
+                    await env.ACTIVE_CALLS.put(twilioLockKey, lockId, { expirationTtl: 120 }); // 10 minutes max lock time
                     
                     // Wait a small amount to let any concurrent operations complete
                     await new Promise(resolve => setTimeout(resolve, 50));
@@ -415,7 +420,7 @@ export class TwilioService {
                     if (currentLock === lockId) {
                         // We successfully have the lock - use original formatted number for DB lookup
                         availableNumber = rawNumber;
-                        console.log(`🔒 Successfully locked Twilio number: ${normalizedNumber} with ID: ${lockId}`);
+                        console.log(`🔒 SUCCESSFULLY LOCKED Twilio number: ${normalizedNumber} with ID: ${lockId} (key: ${twilioLockKey})`);
                         break;
                     } else {
                         // Someone else got the lock, try next number
@@ -424,6 +429,49 @@ export class TwilioService {
                     }
                 } else {
                     console.log(`⚠️  Number ${normalizedNumber} already locked: ${isTwilioLocked}`);
+
+                    // Debug lock age
+                    const lockParts = isTwilioLocked.split('_');
+                    if (lockParts.length === 2) {
+                        const lockTimestamp = parseInt(lockParts[0]);
+                        const currentTime = Date.now();
+                        const lockAge = currentTime - lockTimestamp;
+                        console.log(`🕐 Lock age: ${Math.floor(lockAge/1000)}s (created at: ${new Date(lockTimestamp).toISOString()})`);
+                        console.log(`🕐 Current time: ${new Date(currentTime).toISOString()}`);
+                        console.log(`🕐 Lock will expire in: ${Math.floor((10*60*1000 - lockAge)/1000)}s`);
+                    }
+
+                    // Check if this is a stale lock (older than 10 minutes)
+                    try {
+                        const lockParts = isTwilioLocked.split('_');
+                        if (lockParts.length === 2) {
+                            const lockTimestamp = parseInt(lockParts[0]);
+                            const currentTime = Date.now();
+                            const lockAge = currentTime - lockTimestamp;
+                            const maxLockAge = 2 * 60 * 1000; // 2 minutes (reduced for faster recovery)
+
+                            if (lockAge > maxLockAge) {
+                                console.log(`🧹 Clearing stale lock for ${normalizedNumber} (age: ${Math.floor(lockAge/1000)}s)`);
+                                await env.ACTIVE_CALLS.delete(twilioLockKey);
+
+                                // Now try to lock it again
+                                const newLockId = `${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+                                await env.ACTIVE_CALLS.put(twilioLockKey, newLockId, { expirationTtl: 120 });
+
+                                // Wait and verify
+                                await new Promise(resolve => setTimeout(resolve, 50));
+                                const currentLock = await env.ACTIVE_CALLS.get(twilioLockKey);
+
+                                if (currentLock === newLockId) {
+                                    availableNumber = rawNumber;
+                                    console.log(`✅ Successfully cleared stale lock and re-locked: ${normalizedNumber}`);
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (staleLockError) {
+                        console.log(`❌ Error checking stale lock: ${staleLockError}`);
+                    }
                 }
             }
             
@@ -440,17 +488,44 @@ export class TwilioService {
                 throw new Error("Missing twilioFromNumber parameter");
             }
             
-            const twilioLockKey = `locked_twilio:${twilioFromNumber}`;
+            // Normalize number for locking (remove formatting) - SAME as in the loop above
+            const normalizedTwilioNumber = this.normalizeNumberForLocking(twilioFromNumber);
+            const twilioLockKey = `locked_twilio:${normalizedTwilioNumber}`;
             const isTwilioLocked = await env.ACTIVE_CALLS.get(twilioLockKey);
-            
+
             if (isTwilioLocked) {
-                throw new Error(`TWILIO_BUSY:${twilioFromNumber}`);
+                console.log(`⚠️  Single number ${normalizedTwilioNumber} already locked: ${isTwilioLocked}`);
+
+                // Check if this is a stale lock (older than 10 minutes)
+                try {
+                    const lockParts = isTwilioLocked.split('_');
+                    if (lockParts.length === 2) {
+                        const lockTimestamp = parseInt(lockParts[0]);
+                        const currentTime = Date.now();
+                        const lockAge = currentTime - lockTimestamp;
+                        const maxLockAge = 2 * 60 * 1000; // 2 minutes (reduced for faster recovery)
+
+                        if (lockAge > maxLockAge) {
+                            console.log(`🧹 Clearing stale single number lock for ${normalizedTwilioNumber} (age: ${Math.floor(lockAge/1000)}s)`);
+                            await env.ACTIVE_CALLS.delete(twilioLockKey);
+                            console.log(`✅ Cleared stale lock, proceeding with call`);
+                        } else {
+                            throw new Error(`TWILIO_BUSY:${twilioFromNumber}`);
+                        }
+                    } else {
+                        throw new Error(`TWILIO_BUSY:${twilioFromNumber}`);
+                    }
+                } catch (staleLockError) {
+                    console.log(`❌ Error checking stale single number lock: ${staleLockError}`);
+                    throw new Error(`TWILIO_BUSY:${twilioFromNumber}`);
+                }
             }
-            
+
             // Lock the Twilio FROM number before making the call
-            await env.ACTIVE_CALLS.put(twilioLockKey, 'locked', { expirationTtl: 600 }); // 10 minutes expiration
-            
-            console.log(`Locked Twilio FROM number: ${twilioFromNumber}`);
+            const singleLockId = `${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+            await env.ACTIVE_CALLS.put(twilioLockKey, singleLockId, { expirationTtl: 120 }); // 10 minutes expiration
+
+            console.log(`🔒 SUCCESSFULLY LOCKED single Twilio number: ${twilioFromNumber} (normalized: ${normalizedTwilioNumber}) with ID: ${singleLockId} (key: ${twilioLockKey})`);
         } else {
             // No locking, use provided number
             if (!twilioFromNumber) {
@@ -462,7 +537,7 @@ export class TwilioService {
         // Get bot details including realtime capture settings
             const { data: bot, error: botError } = await supabase
                 .from('bots')
-                .select('voice, system_prompt , is_call_transfer_allowed , call_transfer_number, is_realtime_capture_enabled, realtime_capture_fields')
+                .select('voice, system_prompt , is_call_transfer_allowed , call_transfer_number, is_realtime_capture_enabled, realtime_capture_fields , first_speaker')
                 .eq('id', botId)
                 .eq('user_id', userId)
                 .single();
@@ -587,7 +662,7 @@ export class TwilioService {
                 ...processedTools
             ],
             //@ts-ignore
-            firstSpeaker: "FIRST_SPEAKER_USER",
+            firstSpeaker: bot.first_speaker,
             metadata: {
                 botId,
                 userId,
@@ -630,7 +705,7 @@ export class TwilioService {
                         {
                             name: "callId",
                             location: ParameterLocation.BODY,
-                            knownValue: KnownParamEnum.CALL_ID
+                            knownValue: KnownParamEnum.CALL_ID,
                         }
                     ],
                     http: {
@@ -695,10 +770,11 @@ export class TwilioService {
         if (!ultravoxResponse.ok) {
             // If Ultravox call fails and number locking is enabled, unlock the Twilio FROM number
             if (enableNumberLocking) {
-                const twilioLockKey = `locked_twilio:${selectedTwilioNumber}`;
+                const normalizedNumber = this.normalizeNumberForLocking(selectedTwilioNumber);
+                const twilioLockKey = `locked_twilio:${normalizedNumber}`;
                 try {
                     await env.ACTIVE_CALLS.delete(twilioLockKey);
-                    console.log(`Unlocked Twilio FROM number: ${selectedTwilioNumber} due to Ultravox failure`);
+                    console.log(`🔓 Unlocked Twilio FROM number: ${selectedTwilioNumber} (normalized: ${normalizedNumber}) due to Ultravox failure`);
                 } catch (unlockError) {
                     console.error(`Error unlocking Twilio number after Ultravox failure:`, unlockError);
                 }
@@ -746,6 +822,9 @@ export class TwilioService {
           console.error("Error pushing call to call records", errorPushedCallToCallRecords);
         }
 
+        let parse_to_number = toNumber.replaceAll('-', '');
+        parse_to_number = toNumber.replaceAll(' ', '');
+
         // Create Twilio call
         const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${account_sid}/Calls.json`;
         const twilioResponse = await fetch(twilioUrl, {
@@ -755,7 +834,7 @@ export class TwilioService {
                 'Authorization': 'Basic ' + btoa(`${account_sid}:${auth_token}`)
             },
             body: new URLSearchParams({
-                To: toNumber,
+                To: parse_to_number,
                 From: selectedTwilioNumber,
                 Twiml: `<Response><Connect><Stream url="${joinUrl}" /></Connect></Response>`,
                 MachineDetection: 'DetectMessageEnd',
@@ -767,10 +846,11 @@ export class TwilioService {
         if (!twilioResponse.ok) {
             // If call fails and number locking is enabled, unlock the Twilio FROM number
             if (enableNumberLocking) {
-                const twilioLockKey = `locked_twilio:${selectedTwilioNumber}`;
+                const normalizedNumber = this.normalizeNumberForLocking(selectedTwilioNumber);
+                const twilioLockKey = `locked_twilio:${normalizedNumber}`;
                 try {
                     await env.ACTIVE_CALLS.delete(twilioLockKey);
-                    console.log(`Unlocked Twilio FROM number: ${selectedTwilioNumber} due to call failure`);
+                    console.log(`🔓 Unlocked Twilio FROM number: ${selectedTwilioNumber} (normalized: ${normalizedNumber}) due to call failure`);
                 } catch (unlockError) {
                     console.error(`Error unlocking Twilio number after call failure:`, unlockError);
                 }
@@ -933,15 +1013,32 @@ export class TwilioService {
 
             // ALWAYS unlock the Twilio FROM number if locking was enabled (regardless of end reason)
             if (numberLockingEnabled && twilioFromNumber && this.env) {
-                let number = twilioFromNumber.replaceAll("+", "");
-                number = number.replaceAll(" ", "");
-                number = number.replaceAll("-", "");
-                const twilioLockKey = `locked_twilio:${number}`;
+                const normalizedNumber = this.normalizeNumberForLocking(twilioFromNumber);
+                const twilioLockKey = `locked_twilio:${normalizedNumber}`;
+
+                console.log(`🔓 ATTEMPTING TO UNLOCK: ${twilioFromNumber} (key: ${twilioLockKey})`);
+
+                // First check what's currently in the lock
                 try {
-                    await this.env.ACTIVE_CALLS.delete(twilioLockKey);
-                    console.log(`✅ Successfully unlocked Twilio FROM number: ${twilioFromNumber} (EndReason: ${callConfig.endReason})`);
+                    const currentLockValue = await this.env.ACTIVE_CALLS.get(twilioLockKey);
+                    console.log(`🔍 Current lock value before delete: ${currentLockValue}`);
+
+                    if (currentLockValue) {
+                        await this.env.ACTIVE_CALLS.delete(twilioLockKey);
+                        console.log(`✅ Successfully DELETED lock for Twilio number: ${twilioFromNumber} (normalized: ${normalizedNumber}) (EndReason: ${callConfig.endReason})`);
+
+                        // Verify it's actually deleted
+                        const verifyDeleted = await this.env.ACTIVE_CALLS.get(twilioLockKey);
+                        if (verifyDeleted) {
+                            console.error(`❌ CRITICAL: Lock still exists after delete! Value: ${verifyDeleted}`);
+                        } else {
+                            console.log(`✅ VERIFIED: Lock successfully removed`);
+                        }
+                    } else {
+                        console.log(`⚠️  No lock found to delete for key: ${twilioLockKey}`);
+                    }
                 } catch (error) {
-                    console.error(`❌ Error unlocking Twilio FROM number:`, error);
+                    console.error(`❌ Error unlocking Twilio FROM number ${twilioFromNumber} (key: ${twilioLockKey}):`, error);
                 }
             } else {
                 console.log(`⚠️  Skipping unlock - numberLockingEnabled: ${numberLockingEnabled}, twilioFromNumber: ${twilioFromNumber}, hasEnv: ${!!this.env}`);
@@ -1508,6 +1605,7 @@ RESPONSE HANDLING:
                 const bookingTool: SelectedTool = {
                     temporaryTool:{
                       modelToolName: "bookAppointment",
+                      timeout: "10s",
                       description: `The current date is ${new Date().toDateString().split('T')[0]} \n\nIMPORTANT: Our appointment types have specific default durations, but we can be flexible if needed.\n- ${appointmentTypes.map(type => `${type.name}: ${type.duration} minutes`).join('\n- ')}\n\nIf a caller specifically requests a different duration, you should accommodate their request when possible. Always confirm the appointment type AND duration with the caller before booking.\n\nCRITICAL RESPONSE VALIDATION INSTRUCTIONS:\n1. After calling bookAppointment, carefully check the response:\n   - Look for "success": true in the response\n   - Verify the response contains appointment details\n   - Check for any error messages\n   - Only proceed if the response indicates a successful booking\n\n2. For successful bookings (when response has success: true):\n   - Immediately confirm the booking to the user\n   - Share the appointment details (date, time, type)\n   - Do NOT mention any technical details or API responses\n   - Do NOT ask for additional confirmation\n   - Do NOT retry the booking\n\n3. For failed bookings:\n   - Check the specific error message\n   - Handle common errors (past date, timezone, etc.)\n   - Only retry if the error is recoverable\n   - After 2 failed attempts, suggest trying again later\n\n4. NEVER:\n   - Ignore a successful response\n   - Retry after a successful booking\n   - Show technical error messages to the user\n   - Ask for confirmation after a successful booking\n   - Mention API responses or technical details\n\n5. Example successful response handling:\n   If response is: { "success": true, "appointment": { ... } }\n   Say: "Perfect! I've booked your appointment for [date] at [time]."\n\n6. Example error handling:\n   If response has error: "Cannot book appointments in the past"\n   Say: "I'm sorry, but that date has already passed. Could you choose a future date?"\n\n7. Response Validation Steps:\n   a. Check success status first\n   b. If success is true, confirm booking immediately\n   c. If success is false, check error message\n   d. Handle error appropriately\n   e. Only retry if error is recoverable\n   f. After 2 failures, suggest trying again later\n\n8. Success Confirmation Format:\n   ✓ "Perfect! I've booked your [appointment type] for [date] at [time]."\n   ✓ "Great! Your appointment is confirmed for [date] at [time]."\n   ✓ "I've scheduled your [appointment type] for [date] at [time]."\n\n9. Error Response Format:\n   ✓ "I'm sorry, but [user-friendly error explanation]. Let me try again."\n   ✓ "I'm having trouble booking that time. Would you like to try a different time?"\n   ✓ "I'm unable to book the appointment right now. Please try again later."\n\n10. NEVER use these responses:\n    ❌ "The API returned an error..."\n    ❌ "Let me try booking that again..."\n    ❌ "The system is having issues..."\n    ❌ "There was a problem with the booking..."\n    ❌ Any technical error messages or API details`,
                       dynamicParameters: [
                         {
@@ -1577,6 +1675,7 @@ RESPONSE HANDLING:
                   const rescheduleTool: SelectedTool = {
                     temporaryTool: {
                       modelToolName: "rescheduleAppointment",
+                      timeout: "10s",
                       description: "To reschedule an existing appointment, you need to get the eventId first. Use the lookup tool to confirm them and get the eventId first, then call this tool with the eventId, new date, and new time.",
                       dynamicParameters: [
                         {
@@ -1615,6 +1714,7 @@ RESPONSE HANDLING:
                   const cancelTool: SelectedTool = {
                     temporaryTool: {
                       modelToolName: "cancelAppointment",
+                      timeout: "10s",
                       description: "Cancel an existing appointment. Always ask for the user's name, email, the slot they booked (date, time, and timezone). Use the /api/appointments/lookup endpoint to get the eventId first, then call this tool with the eventId.",
                       dynamicParameters: [
                         {
@@ -1635,6 +1735,7 @@ RESPONSE HANDLING:
                   const lookupTool: SelectedTool = {
                     temporaryTool: {
                       modelToolName: "lookupAppointment",
+                      timeout: "10s",
                       description: "Look up an existing appointment in Google Calendar. Always use this tool first to confirm the user's appointment details and obtain the eventId before attempting to cancel or reschedule. Provide the user's name, email, the slot they booked (date, time, and timezone), and their Google Calendar access token. remeber the present date is " + new Date().toDateString().split('T')[0] + " and the present time is " + new Date().toLocaleTimeString(),
                       dynamicParameters: [
                         {

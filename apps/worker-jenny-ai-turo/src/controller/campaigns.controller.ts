@@ -369,7 +369,7 @@ export async function startCampaign(c: Context) {
       );
     }
 
-    // Queue all campaign calls
+    // Queue campaign calls (with smart number locking if enabled)
     const queueResult = await campaignsService.queueCampaignCalls(campaign_id);
 
     if (!queueResult.success) {
@@ -383,9 +383,16 @@ export async function startCampaign(c: Context) {
       );
     }
 
+    // Provide detailed feedback about the queueing result
+    let message = `Campaign started successfully. ${queueResult.queued_count} calls queued.`;
+    if (queueResult.message.includes('pending')) {
+      message = queueResult.message; // Use the detailed message with pending count
+    }
+
     return c.json({
       status: "success",
-      message: `Campaign started successfully. ${queueResult.queued_count} calls queued.`,
+      message: message,
+      queued_count: queueResult.queued_count,
     });
   } catch (error) {
     console.error("Start Campaign Error:", error);
@@ -1119,12 +1126,18 @@ ${fullTranscript}
 ${questionsText}
 
 INSTRUCTIONS:
-- Analyze the call ${fullTranscript ? "transcript and summary" : "summary"} to answer each question
-- If the information is clearly stated, provide the answer with "high" confidence
-- If you can infer the answer with reasonable certainty, use "medium" confidence  
-- If the information is not available or unclear, state "Not specified in the conversation" with "low" confidence
-- Be specific and concise in your answers
-- Use the full transcript when available for more detailed analysis
+- Always carefully scan the transcript and summary for the requested information.
+- For fields like email, phone numbers, or names, copy them **exactly as spoken or confirmed in the transcript** (do not reformat).
+- If the information is clearly stated, provide the answer with "high" confidence.
+- If you can infer the answer with reasonable certainty, use "medium" confidence.
+- If the information is not available or unclear, state "Not specified in the conversation" with "low" confidence.
+- Be concise and specific in your answers.
+- Use the transcript when available for maximum accuracy.
+
+STRICT OUTPUT REQUIREMENTS:
+- Output must be valid JSON only
+- Do not include any extra commentary, explanations, or text outside of JSON
+- Use the following schema exactly:
 
 RESPONSE FORMAT (JSON):
 {
@@ -1138,6 +1151,7 @@ RESPONSE FORMAT (JSON):
 Please respond with valid JSON only, no additional text.`;
 
         console.log("Worker API: Prompt:", prompt);
+
 
         // Call Gemini API
         const geminiResponse = await fetch(
