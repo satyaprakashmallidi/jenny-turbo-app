@@ -570,7 +570,7 @@ export class TwilioService {
         }
 
         if(configureBots){
-            const tools = await this.configureBotTools(botId , userId , supabase);
+            const tools = await this.configureBotTools(botId , userId , supabase, toNumber);
             processedTools.push(...tools);
         }
 
@@ -980,7 +980,7 @@ export class TwilioService {
         delete this.activeCalls[callSid];
     }
 
-    private async configureBotTools(botId: string, userId: string, supabase: SupabaseClient): Promise<SelectedTool[]> {
+    private async configureBotTools(botId: string, userId: string, supabase: SupabaseClient, toNumber?: string): Promise<SelectedTool[]> {
         try{
             const { data : bot, error: errorBots } = await supabase
             .from('bots')
@@ -1012,7 +1012,7 @@ export class TwilioService {
             const tools: SelectedTool[] = [];
 
             if(bot.is_appointment_booking_allowed){
-                const appointmentTools = await this.configureAppointmentTool(bot.appointment_tool_id, botId, userId, supabase);
+                const appointmentTools = await this.configureAppointmentTool(bot.appointment_tool_id, botId, userId, supabase, toNumber);
                 tools.push(...appointmentTools);
             }
 
@@ -1059,7 +1059,7 @@ export class TwilioService {
         }
     }
 
-    private async configureAppointmentTool(appointmentToolId: string, botId: string, userId: string, supabase: SupabaseClient): Promise<any[]> {
+    private async configureAppointmentTool(appointmentToolId: string, botId: string, userId: string, supabase: SupabaseClient, toNumber?: string): Promise<any[]> {
         try{
             const tools: SelectedTool[] = [];
 
@@ -1077,6 +1077,7 @@ export class TwilioService {
                     calendar_email: string;
                     prompt_template: string;
                     is_calcom: boolean;
+                    is_ghl:boolean;
 
                 }[];
                 error: any;
@@ -1312,6 +1313,156 @@ export class TwilioService {
     
                   return tools;
 
+            } else if(appointmentToolDetails.is_ghl) {
+                // GHL (GoHighLevel) appointment booking
+                console.log("Configuring GHL appointment booking tool...");
+
+                const appointmentTypes = (await this.getAppointmentTypes(appointmentToolDetails)).appointmentTypes;
+                const businessHours = appointmentToolDetails.business_hours;
+
+                console.log("GHL appointment types:", appointmentTypes);
+                console.log("GHL business hours:", businessHours);
+
+                const staticParameters = [
+                    {
+                        name: "appointmentToolId",
+                        location: ParameterLocation.QUERY,
+                        value: appointmentToolId,
+                    },
+                    {
+                        name: "toNumber",
+                        location: ParameterLocation.QUERY,
+                        value: toNumber || "",
+                    }
+                ];
+
+
+                // Format time slots based on duration
+                const formatTimeSlots = (duration: number) => {
+                    if (duration === 30) {
+                        return "11:00 AM, 11:30 AM, 12:00 PM, 12:30 PM, 1:00 PM, 1:30 PM, 2:00 PM, 2:30 PM, 3:00 PM, 3:30 PM, 4:00 PM, 4:30 PM";
+                    } else if (duration === 60) {
+                        return "11:00 AM, 12:00 PM, 1:00 PM, 2:00 PM, 3:00 PM, 4:00 PM";
+                    } else {
+                        return "11:00 AM, 11:30 AM, 12:00 PM, 12:30 PM, 1:00 PM, 1:30 PM, 2:00 PM";
+                    }
+                };
+
+                const appointmentDuration = appointmentTypes[0]?.duration || 30;
+                const timeSlots = formatTimeSlots(appointmentDuration);
+
+                // Parse business hours for validation
+                const parsedBusinessHours = JSON.parse(businessHours || '{}');
+
+                // Create validation instruction for the AI
+                const businessHoursValidation = Object.entries(parsedBusinessHours).map(([day, hours]: [string, any]) => {
+                    if (hours.enabled) {
+                        return `${day}: ${hours.start} - ${hours.end}`;
+                    } else {
+                        return `${day}: CLOSED`;
+                    }
+                }).join('\n');
+
+                const bookingTool: SelectedTool = {
+                    temporaryTool: {
+                        modelToolName: "bookAppointment",
+                        timeout: "10s",
+                        description: `Book an appointment using GoHighLevel. The current date is ${new Date().toDateString()}.
+
+APPOINTMENT TYPE: ${appointmentTypes[0]?.name || 'go high level '} (${appointmentDuration} minutes)
+
+BUSINESS HOURS (MUST VALIDATE BEFORE BOOKING):
+${businessHoursValidation}
+
+CRITICAL VALIDATION REQUIREMENTS:
+1. **Day Validation**: Check if the requested day is open (not CLOSED)
+2. **Time Validation**: Ensure the time is within business hours for that day
+3. **Time Slot Validation**: GHL only accepts ${appointmentDuration}-minute intervals
+   - Valid slots: ${timeSlots}
+   - If user requests 11:15, 11:45, etc., ask them to choose from valid slots
+
+BEFORE CALLING THE API:
+- Validate the day is not closed
+- Validate the time is within business hours
+- Validate the time follows the ${appointmentDuration}-minute interval
+- If ANY validation fails, explain the constraint and ask for a different time
+- DO NOT call the API if validation fails
+
+RESPONSE HANDLING:
+- On success: Confirm the appointment details immediately
+- On failure: Check the error message and guide the user accordingly
+- Never retry more than twice for the same booking`,
+                        dynamicParameters: [
+                            {
+                                name: "appointmentDetails",
+                                location: ParameterLocation.BODY,
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        date: {
+                                            type: "string",
+                                            format: "YYYY-MM-DD",
+                                            description: `The appointment date. Current year is ${new Date().getFullYear()}. MUST validate this against business hours.`
+                                        },
+                                        time: {
+                                            type: "string",
+                                            pattern: "^(1[0-2]|[1-9]):(00|30)\\s?(AM|PM)$",
+                                            description: `Time in 12-hour format with AM/PM. Must be at ${appointmentDuration}-minute intervals. Available slots: ${timeSlots}. MUST be within business hours.`
+                                        },
+                                        timezone: {
+                                            type: "string",
+                                            description: "Timezone in IANA format (e.g., 'America/New_York', 'Asia/Kolkata'). Convert user-provided timezones to IANA format."
+                                        },
+                                        firstName: {
+                                            type: "string",
+                                            description: "Customer's first name"
+                                        },
+                                        lastName: {
+                                            type: "string",
+                                            description: "Customer's last name"
+                                        },
+                                        email: {
+                                            type: "string",
+                                            format: "email",
+                                            description: "Customer's email address"
+                                        },
+                                        appointmentType: {
+                                            type: "string",
+                                            description: `The appointment type. Use: ${appointmentTypes[0]?.name || 'go high level'}`,
+                                            default: appointmentTypes[0]?.name || 'go high level'
+                                        },
+                                        appointmentDuration: {
+                                            type: "number",
+                                            description: `Duration in minutes. Use: ${appointmentDuration}`,
+                                            default: appointmentDuration
+                                        }
+                                    },
+                                    required: [
+                                        "date",
+                                        "time",
+                                        "timezone",
+                                        "firstName",
+                                        "lastName",
+                                        "email",
+                                        "appointmentType",
+                                        "appointmentDuration"
+                                    ]
+                                },
+                                required: true
+                            }
+                        ],
+                        http: {
+                            baseUrlPattern: `${jenny_url}/api/gh/book`,
+                            httpMethod: "POST"
+                        },
+                        staticParameters: staticParameters
+                    }
+                };
+
+                console.log("✅ Successfully created GHL appointment tool configuration");
+                tools.push(bookingTool);
+
+                return tools;
 
             } else {
                 const calendarAccount = await this.getUserCalendarAccount(userId, supabase);
