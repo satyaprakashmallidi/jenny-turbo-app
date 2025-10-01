@@ -144,6 +144,197 @@ export async function handleWebhook(c: Context) {
   }
 }
 
+export async function startedCall(c: Context) {
+  try {
+    const body = await c.req.json();
+    const { event, call } = body;
+
+    console.log("Call Started Event", event, "Call", call);
+    console.log("📋 Call metadata received:", call?.metadata);
+
+    // Notify user webhooks for call.started event
+    try {
+      let userId = call?.metadata?.['user_id'] || call?.metadata?.['userId'];
+      let botId = call?.metadata?.['bot_id'];
+
+      if (userId) {
+        console.log(`🔔 Checking for user webhooks to notify for call.started event (user: ${userId})`);
+
+        // Import and initialize webhooks service
+        const { WebhooksService } = await import('../services/webhooks.service');
+        const webhooksService = WebhooksService.getInstance();
+        webhooksService.setDependencies(c.req.db, c.req.env);
+
+        // Get user webhooks that listen for 'call.started' events
+        const webhooks = await webhooksService.getUserWebhooksForEvent(userId, 'call.started', botId);
+
+        if (webhooks.length > 0) {
+          console.log(`📤 Found ${webhooks.length} webhook(s) to notify for call.started`);
+
+          // Extract campaign information
+          let campaign_id = call?.metadata?.['campaign_id'];
+          let contact_id = call?.metadata?.['contact_id'];
+          let job_id = call?.metadata?.['job_id'];
+
+          // Prepare webhook payload with call information
+          const webhookPayload = {
+            event: 'call.started',
+            timestamp: new Date().toISOString(),
+            call: {
+              callId: call.callId,
+              created: call.created,
+              recordingEnabled: call.recordingEnabled,
+              joinTimeout: call.joinTimeout,
+              maxDuration: call.maxDuration,
+              voice: call.voice,
+              temperature: call.temperature,
+              timeExceededMessage: call.timeExceededMessage,
+              systemPrompt: call.systemPrompt,
+              metadata: call.metadata
+            },
+            user: {
+              userId: userId,
+              botId: botId
+            },
+            // Add campaign information if available (for campaign calls)
+            ...(campaign_id && {
+              campaign: {
+                campaign_id,
+                contact_id,
+                job_id
+              }
+            })
+          };
+
+          // Send webhooks in parallel (non-blocking)
+          webhooksService.notifyWebhooks(webhooks, webhookPayload)
+            .then(result => {
+              console.log(`🔔 call.started webhook notifications result: ${result.success} success, ${result.failed} failed`);
+            })
+            .catch(error => {
+              console.error('❌ Error sending call.started webhook notifications:', error);
+            });
+        } else {
+          console.log(`📭 No webhooks found for user ${userId} with 'call.started' event`);
+        }
+      } else {
+        console.log('⚠️ No user ID found in call metadata, skipping webhook notifications');
+      }
+    } catch (webhookError) {
+      console.error('❌ Error processing call.started webhook notifications:', webhookError);
+      // Continue with the rest of the function even if webhook notifications fail
+    }
+
+    return c.json({
+      status: 'success',
+      message: 'Call started webhook processed successfully'
+    });
+  } catch (error) {
+    console.error('Call Started Webhook Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Failed to process call started webhook',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+}
+
+export async function joinedCall(c: Context) {
+  try {
+    const body = await c.req.json();
+    const { event, call } = body;
+
+    console.log("Call Joined Event", event, "Call", call);
+    console.log("📋 Call metadata received:", call?.metadata);
+
+    // Notify user webhooks for call.joined event
+    try {
+      let userId = call?.metadata?.['user_id'] || call?.metadata?.['userId'];
+      let botId = call?.metadata?.['bot_id'];
+
+      if (userId) {
+        console.log(`🔔 Checking for user webhooks to notify for call.joined event (user: ${userId})`);
+
+        // Import and initialize webhooks service
+        const { WebhooksService } = await import('../services/webhooks.service');
+        const webhooksService = WebhooksService.getInstance();
+        webhooksService.setDependencies(c.req.db, c.req.env);
+
+        // Get user webhooks that listen for 'call.joined' events
+        const webhooks = await webhooksService.getUserWebhooksForEvent(userId, 'call.joined', botId);
+
+        if (webhooks.length > 0) {
+          console.log(`📤 Found ${webhooks.length} webhook(s) to notify for call.joined`);
+
+          // Extract campaign information
+          let campaign_id = call?.metadata?.['campaign_id'];
+          let contact_id = call?.metadata?.['contact_id'];
+          let job_id = call?.metadata?.['job_id'];
+
+          // Prepare webhook payload with call information
+          const webhookPayload = {
+            event: 'call.joined',
+            timestamp: new Date().toISOString(),
+            call: {
+              callId: call.callId,
+              created: call.created,
+              joined: call.joined,
+              recordingEnabled: call.recordingEnabled,
+              joinTimeout: call.joinTimeout,
+              maxDuration: call.maxDuration,
+              voice: call.voice,
+              temperature: call.temperature,
+              timeExceededMessage: call.timeExceededMessage,
+              systemPrompt: call.systemPrompt,
+              metadata: call.metadata
+            },
+            user: {
+              userId: userId,
+              botId: botId
+            },
+            // Add campaign information if available (for campaign calls)
+            ...(campaign_id && {
+              campaign: {
+                campaign_id,
+                contact_id,
+                job_id
+              }
+            })
+          };
+
+          // Send webhooks in parallel (non-blocking)
+          webhooksService.notifyWebhooks(webhooks, webhookPayload)
+            .then(result => {
+              console.log(`🔔 call.joined webhook notifications result: ${result.success} success, ${result.failed} failed`);
+            })
+            .catch(error => {
+              console.error('❌ Error sending call.joined webhook notifications:', error);
+            });
+        } else {
+          console.log(`📭 No webhooks found for user ${userId} with 'call.joined' event`);
+        }
+      } else {
+        console.log('⚠️ No user ID found in call metadata, skipping webhook notifications');
+      }
+    } catch (webhookError) {
+      console.error('❌ Error processing call.joined webhook notifications:', webhookError);
+      // Continue with the rest of the function even if webhook notifications fail
+    }
+
+    return c.json({
+      status: 'success',
+      message: 'Call joined webhook processed successfully'
+    });
+  } catch (error) {
+    console.error('Call Joined Webhook Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Failed to process call joined webhook',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+}
+
 export async function finishCall(c: Context) {
   try {
     const body = await c.req.json();

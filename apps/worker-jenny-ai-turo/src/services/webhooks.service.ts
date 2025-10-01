@@ -86,18 +86,16 @@ export class WebhooksService {
   async createWebhook(request: CreateWebhookRequest, userId: string): Promise<DatabaseWebhook> {
     this.validateDependencies();
 
+    console.log('Creating webhook:', request);
+
     try {
       // Generate a secret if not provided
       if (!request.secrets || request.secrets.length === 0) {
         request.secrets = [this.generateWebhookSecret()];
       }
 
-      // Generate a unique webhook ID for our system
-      const webhookId = `wh_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-
       // Create webhook directly in our database
       const dbWebhook: Partial<DatabaseWebhook> = {
-        webhook_id: webhookId,
         user_id: userId,
         ultravox_webhook_id: null, // Not using Ultravox anymore
         url: request.url,

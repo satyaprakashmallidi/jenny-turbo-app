@@ -3,7 +3,7 @@ import twilioRoutes from './routes/twilio.routes'
 import agentRoutes from './routes/agents.routes'
 import toolRoutes from './routes/tools.routes'
 import { CallConfig, CallConfigWebhookResponse } from './types/repo-common-types';
-import { finishCall } from './controller/twilio.controller';
+import { finishCall, startedCall, joinedCall } from './controller/twilio.controller';
 import corpusRoutes from './routes/corpus.routes'
 import singleTwilioRoutes from './routes/single-twilio-account.routes'
 import callTranscriptsRoutes from './routes/call-transcripts.routes'
@@ -471,6 +471,8 @@ app.route('/api/call-transcripts', callTranscriptsRoutes);
 app.route('/api/webhooks', webhooksRoutes);
 
 app.post('/api/finish-call', finishCall);
+app.post('/api/started-call', startedCall);
+app.post('/api/joined-call', joinedCall);
 
 // Debug endpoint for campaign status
 app.get('/api/debug-campaign/:campaign_id', async (c) => {

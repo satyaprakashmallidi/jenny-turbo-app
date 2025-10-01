@@ -3,7 +3,7 @@ import { createAccount, deleteAccount, getAccount, getAllAccounts, updateAccount
 import { Env } from "../config/env";
 import { SupabaseClient } from "@supabase/supabase-js";
 import { createPhoneNumber, deletePhoneNumber, updatePhoneNumber } from "../controller/twilio-phone.controller";
-import { finishCall, handleWebhook, makeCall, transferCall } from "../controller/twilio.controller";
+import { handleWebhook, makeCall, transferCall } from "../controller/twilio.controller";
 
 declare module 'hono' {
     interface HonoRequest {
@@ -30,6 +30,5 @@ twilioRoutes.delete('/phone-number/:id', deletePhoneNumber);
 twilioRoutes.post('/call', makeCall);
 twilioRoutes.post('/transfer-call', transferCall);
 twilioRoutes.post('/webhook', handleWebhook);
-twilioRoutes.post('/finish-call', finishCall);
 
 export default twilioRoutes;
