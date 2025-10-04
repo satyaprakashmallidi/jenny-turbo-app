@@ -1155,7 +1155,7 @@ Please respond with valid JSON only, no additional text.`;
 
         // Call Gemini API
         const geminiResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`,
+          `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
           {
             method: "POST",
             headers: {
@@ -1180,6 +1180,7 @@ Please respond with valid JSON only, no additional text.`;
         );
 
         if (!geminiResponse.ok) {
+          console.error(`Gemini API responded: ${JSON.stringify(await geminiResponse.json())}`);
           throw new Error(
             `Gemini API responded with status: ${geminiResponse.status}`
           );
