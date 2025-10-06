@@ -1507,7 +1507,7 @@ app.post('/api/add-call-to-db', async (c) => {
 app.get('/api/get-all-calls-of-user', async (c) => {
   try {
     const userId = c.req.query('user_id');
-    
+
     if (!userId) {
       return c.json({
         status: 'error',
@@ -1539,6 +1539,75 @@ app.get('/api/get-all-calls-of-user', async (c) => {
       status: 'error',
       message: 'Internal Server Error',
       error: error,
+    }, 500);
+  }
+});
+
+// Concurrency Management Endpoints
+app.get('/api/concurrency/stats', async (c) => {
+  try {
+    const { ConcurrencyService } = await import('./services/concurrency.service');
+    const concurrencyService = ConcurrencyService.getInstance();
+    concurrencyService.setDependencies(c.req.env);
+
+    const stats = await concurrencyService.getStats();
+
+    return c.json({
+      status: 'success',
+      data: stats,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Get Concurrency Stats Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Failed to get concurrency stats',
+      error: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+app.post('/api/concurrency/reset', async (c) => {
+  try {
+    const { ConcurrencyService } = await import('./services/concurrency.service');
+    const concurrencyService = ConcurrencyService.getInstance();
+    concurrencyService.setDependencies(c.req.env);
+
+    await concurrencyService.resetConcurrency();
+
+    return c.json({
+      status: 'success',
+      message: 'Concurrency counter reset to 0'
+    });
+  } catch (error) {
+    console.error('Reset Concurrency Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Failed to reset concurrency',
+      error: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+app.post('/api/concurrency/clear-pending', async (c) => {
+  try {
+    const { ConcurrencyService } = await import('./services/concurrency.service');
+    const concurrencyService = ConcurrencyService.getInstance();
+    concurrencyService.setDependencies(c.req.env);
+
+    const clearedCount = await concurrencyService.clearPendingCalls();
+
+    return c.json({
+      status: 'success',
+      message: `Cleared ${clearedCount} pending calls from buffer`,
+      cleared_count: clearedCount
+    });
+  } catch (error) {
+    console.error('Clear Pending Calls Error:', error);
+    return c.json({
+      status: 'error',
+      message: 'Failed to clear pending calls',
+      error: error instanceof Error ? error.message : String(error)
     }, 500);
   }
 });
@@ -1767,41 +1836,107 @@ export default {
           const baseDelay = 15;
           const exponentialDelay = Math.min(300, baseDelay * Math.pow(2, retryCount));
           
-          // If Ultravox returns 429, use exponential backoff
-          if (errorMessage.toLowerCase().includes('concurency limit')) {
-            console.log(`🔄 Ultravox concurrency limit hit, retrying in ${exponentialDelay}s (attempt ${retryCount + 1})`);
-            
-            // Reset job status back to pending for retry
-            await supabase.from('call_jobs').upsert({ 
-              job_id, 
-              status: 'pending', 
-              error_message: `Waiting for Ultravox capacity - attempt ${retryCount + 1} - ${new Date().toISOString()}`,
-              updated_at: new Date().toISOString() 
-            }, { onConflict: 'job_id' });
-            
-            // Reset campaign contact status if this is a campaign call
-            if (payload.campaign_id && payload.contact_id) {
-              await supabase
-                .from('call_campaign_contacts')
-                .update({
-                  call_status: 'queued',
-                  error_message: `Waiting for Ultravox capacity - attempt ${retryCount + 1} - ${new Date().toISOString()}`
-                })
-                .eq('contact_id', payload.contact_id);
+          // If Ultravox returns 429, use exponential backoff (max 5 retries, then move to KV buffer)
+          if (errorMessage.toLowerCase().includes('concurency limit') || errorMessage.toLowerCase().includes('429')) {
+            const max429Retries = 5;
+
+            if (retryCount < max429Retries) {
+              // Retry with exponential backoff (first 5 attempts)
+              console.log(`🔄 Ultravox concurrency limit hit, retrying in ${exponentialDelay}s (attempt ${retryCount + 1}/${max429Retries})`);
+
+              // Reset job status back to pending for retry
+              await supabase.from('call_jobs').upsert({
+                job_id,
+                status: 'pending',
+                error_message: `Waiting for Ultravox capacity - attempt ${retryCount + 1} - ${new Date().toISOString()}`,
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'job_id' });
+
+              // Reset campaign contact status if this is a campaign call
+              if (payload.campaign_id && payload.contact_id) {
+                await supabase
+                  .from('call_campaign_contacts')
+                  .update({
+                    call_status: 'queued',
+                    error_message: `Waiting for Ultravox capacity - attempt ${retryCount + 1} - ${new Date().toISOString()}`
+                  })
+                  .eq('contact_id', payload.contact_id);
+              }
+
+              // Store updated retry count in database
+              await supabase.from('call_jobs').upsert({
+                job_id,
+                retry_count: retryCount + 1,
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'job_id' });
+
+              msg.retry({
+                delaySeconds: exponentialDelay
+              });
+              return;
+            } else {
+              // After 5 retries, move to KV buffer instead of continuing to retry
+              console.log(`⚠️ Max 429 retries reached (${max429Retries}), buffering job ${job_id} to KV`);
+
+              try {
+                const { ConcurrencyService } = await import('./services/concurrency.service');
+                const concurrencyService = ConcurrencyService.getInstance();
+                concurrencyService.setDependencies(processedEnv);
+
+                // Store in KV buffer
+                await concurrencyService.addPendingCall({
+                  job_id,
+                  payload,
+                  queued_at: new Date().toISOString()
+                });
+
+                // Update job status to pending (buffered in KV)
+                await supabase.from('call_jobs').upsert({
+                  job_id,
+                  status: 'pending',
+                  error_message: `Buffered in KV after ${max429Retries} 429 retries - ${new Date().toISOString()}`,
+                  retry_count: retryCount + 1,
+                  updated_at: new Date().toISOString()
+                }, { onConflict: 'job_id' });
+
+                // Update contact status back to pending
+                if (payload.campaign_id && payload.contact_id) {
+                  await supabase
+                    .from('call_campaign_contacts')
+                    .update({
+                      call_status: 'pending',
+                      error_message: `Buffered in KV - waiting for concurrency slot - ${new Date().toISOString()}`
+                    })
+                    .eq('contact_id', payload.contact_id);
+                }
+
+                console.log(`💾 Successfully buffered job ${job_id} to KV after 429 errors`);
+                return; // Don't retry from queue anymore
+              } catch (kvError) {
+                console.error(`❌ Failed to buffer job ${job_id} to KV:`, kvError);
+                // Fall through to mark as failed
+
+                await supabase.from('call_jobs').upsert({
+                  job_id,
+                  status: 'failed',
+                  error_message: `Failed to buffer to KV after 429 errors: ${kvError instanceof Error ? kvError.message : String(kvError)}`,
+                  updated_at: new Date().toISOString(),
+                  processed_at: new Date().toISOString()
+                }, { onConflict: 'job_id' });
+
+                if (payload.campaign_id && payload.contact_id) {
+                  await supabase
+                    .from('call_campaign_contacts')
+                    .update({
+                      call_status: 'failed',
+                      error_message: `Failed to buffer after 429 errors`,
+                      completed_at: new Date().toISOString()
+                    })
+                    .eq('contact_id', payload.contact_id);
+                }
+                return;
+              }
             }
-            
-            // Store updated retry count in database instead of message payload since 
-            // Cloudflare Queue doesn't support payload modification in retry
-            await supabase.from('call_jobs').upsert({ 
-              job_id, 
-              retry_count: retryCount + 1,
-              updated_at: new Date().toISOString() 
-            }, { onConflict: 'job_id' });
-            
-            msg.retry({
-              delaySeconds: exponentialDelay
-            });
-            return;
           }
           
           // If Twilio number is busy, use shorter exponential backoff
@@ -1932,14 +2067,26 @@ export default {
           
           continue;
         }
-        // Success: update job with callId
+        // Success: update job with callId and increment concurrency counter
         console.log(`✅ Call created successfully with Ultravox call ID: ${callId}`);
-        const { error: jobUpdateError } = await supabase.from('call_jobs').upsert({ 
-          job_id, 
-          status: 'success', 
+
+        // Increment concurrency counter (a call is now active)
+        try {
+          const { ConcurrencyService } = await import('./services/concurrency.service');
+          const concurrencyService = ConcurrencyService.getInstance();
+          concurrencyService.setDependencies(processedEnv);
+          await concurrencyService.incrementConcurrency();
+        } catch (concurrencyError) {
+          console.error('Error incrementing concurrency:', concurrencyError);
+          // Continue anyway - this is not critical
+        }
+
+        const { error: jobUpdateError } = await supabase.from('call_jobs').upsert({
+          job_id,
+          status: 'success',
           ultravox_call_id: callId,
-          updated_at: new Date().toISOString(), 
-          processed_at: new Date().toISOString() 
+          updated_at: new Date().toISOString(),
+          processed_at: new Date().toISOString()
         }, { onConflict: 'job_id' });
         
         if (jobUpdateError) {

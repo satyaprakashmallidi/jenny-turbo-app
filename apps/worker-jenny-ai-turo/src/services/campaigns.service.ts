@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { TwilioService } from "./twilio.service";
+import { ConcurrencyService } from "./concurrency.service";
 
 export interface TimeWindow {
   start_hour: number; // 0-23 (24-hour format)
@@ -95,10 +96,18 @@ export class CampaignsService {
   }
 
   /**
-   * Queue contacts in a campaign for calling - with smart number locking
+   * Queue contacts in a campaign for calling - with smart number locking and concurrency management
    */
-  async queueCampaignCalls(campaign_id: string): Promise<{ success: boolean; message: string; queued_count?: number; error?: string; completed?: boolean }> {
+  async queueCampaignCalls(campaign_id: string): Promise<{ success: boolean; message: string; queued_count?: number; buffered_count?: number; error?: string; completed?: boolean }> {
     try {
+      // Initialize concurrency service
+      const concurrencyService = ConcurrencyService.getInstance();
+      concurrencyService.setDependencies(this.env);
+
+      // Get current concurrency stats
+      const stats = await concurrencyService.getStats();
+      console.log(`📊 Concurrency stats before campaign start:`, stats);
+
       // Get campaign details
       const { data: campaignData, error: campaignError } = await this.db
         .from('call_campaigns')
@@ -122,32 +131,34 @@ export class CampaignsService {
                            (campaignData.twilio_phone_numbers && campaignData.twilio_phone_numbers.length > 1);
 
       const availableNumbers = campaignData.twilio_phone_numbers?.length || 1;
-      const maxContactsToQueue = isNumberLocked ? availableNumbers : 100; // Limit to available numbers if locked, otherwise use reasonable batch
+
+      // Calculate how many contacts to queue immediately vs buffer
+      const availableSlots = stats.available_slots;
+      const maxContactsToQueueNow = Math.min(
+        isNumberLocked ? availableNumbers : availableSlots,
+        availableSlots
+      );
 
       console.log(`🔒 Number locking status: ${isNumberLocked ? 'ENABLED' : 'DISABLED'}`);
       console.log(`📞 Available Twilio numbers: ${availableNumbers}`);
-      console.log(`📊 Max contacts to queue initially: ${maxContactsToQueue}`);
+      console.log(`📊 Available concurrency slots: ${availableSlots}/${stats.max_concurrency}`);
+      console.log(`📊 Max contacts to queue now: ${maxContactsToQueueNow}`);
 
-      // Get pending contacts (limited if number locking is enabled)
+      // Get ALL pending contacts
       const { data: contactsData, error: contactsError } = await this.db
         .from('call_campaign_contacts')
         .select('*')
         .eq('campaign_id', campaign_id)
         .eq('call_status', 'pending')
-        .limit(maxContactsToQueue);
+        .order('created_at', { ascending: true });
 
-      console.log("📋 Contacts found for initial queueing:", {
+      console.log("📋 Contacts found for queueing:", {
         campaign_id,
         total_contacts_in_campaign: campaignData.total_contacts,
         pending_contacts_found: contactsData?.length || 0,
-        will_queue: Math.min(contactsData?.length || 0, maxContactsToQueue),
-        number_locking_enabled: isNumberLocked,
-        contact_details: contactsData?.map((c: any) => ({
-          contact_id: c.contact_id,
-          contact_phone: c.contact_phone,
-          contact_name: c.contact_name,
-          call_status: c.call_status
-        })) || []
+        will_queue_immediately: Math.min(contactsData?.length || 0, maxContactsToQueueNow),
+        will_buffer_to_kv: Math.max(0, (contactsData?.length || 0) - maxContactsToQueueNow),
+        number_locking_enabled: isNumberLocked
       });
 
       if (contactsError) {
@@ -156,32 +167,39 @@ export class CampaignsService {
 
       if (!contactsData || contactsData.length === 0) {
         console.log(`📋 No pending contacts found for campaign ${campaign_id}, checking if campaign should be completed...`);
-        
+
         // If no pending contacts found, check if campaign should be marked as completed
         const statusCheckResult = await this.checkAndUpdateCampaignStatus(campaign_id);
         console.log(`🔍 Campaign status check result:`, statusCheckResult);
-        
+
         if (statusCheckResult.status === 'completed') {
           console.log(`✅ Campaign ${campaign_id} has been marked as completed!`);
           return { success: true, message: 'Campaign completed - no pending contacts remaining', queued_count: 0, completed: true };
         }
-        
+
         return { success: false, message: 'No pending contacts found' };
       }
 
-      // Queue calls for each contact (limited by maxContactsToQueue if number locking is enabled)
-      let queuedCount = 0;
-      const contactsToQueue = isNumberLocked ? contactsData.slice(0, maxContactsToQueue) : contactsData;
-      console.log(`🔄 Starting to process ${contactsToQueue.length} contacts for initial queueing (out of ${contactsData.length} pending)...`);
+      // Split contacts into immediate queue and buffer
+      const contactsToQueueNow = contactsData.slice(0, maxContactsToQueueNow);
+      const contactsToBuffer = contactsData.slice(maxContactsToQueueNow);
 
-      for (const contact of contactsToQueue) {
+      console.log(`🔄 Starting to process contacts...`);
+      console.log(`  ✅ Immediate queue: ${contactsToQueueNow.length} contacts`);
+      console.log(`  💾 Buffer to KV: ${contactsToBuffer.length} contacts`);
+
+      let queuedCount = 0;
+      let bufferedCount = 0;
+
+      // Process contacts for immediate queueing
+      for (const contact of contactsToQueueNow) {
         try {
-          console.log(`📞 Processing contact ${queuedCount + 1}/${contactsToQueue.length}:`, {
+          console.log(`📞 Queueing contact ${queuedCount + 1}/${contactsToQueueNow.length}:`, {
             contact_id: contact.contact_id,
             contact_phone: contact.contact_phone,
             contact_name: contact.contact_name
           });
-          
+
           const job_id = randomUUID();
           console.log(`🆔 Generated job_id: ${job_id}`);
           
@@ -309,22 +327,128 @@ export class CampaignsService {
           }
 
           queuedCount++;
-          console.log(`✅ Contact ${queuedCount}/${contactsToQueue.length} completed successfully`);
+          console.log(`✅ Contact ${queuedCount}/${contactsToQueueNow.length} queued successfully`);
         } catch (error) {
           console.error('❌ Error queueing contact:', contact.contact_id, error);
         }
       }
 
-      // Log remaining contacts if number locking is enabled
-      if (isNumberLocked && contactsData.length > contactsToQueue.length) {
-        const remainingContacts = contactsData.length - contactsToQueue.length;
-        console.log(`⏳ ${remainingContacts} contacts remain pending and will be queued as numbers become available`);
+      // Now buffer the remaining contacts in KV
+      for (const contact of contactsToBuffer) {
+        try {
+          console.log(`💾 Buffering contact ${bufferedCount + 1}/${contactsToBuffer.length}:`, {
+            contact_id: contact.contact_id,
+            contact_phone: contact.contact_phone,
+            contact_name: contact.contact_name
+          });
+
+          const job_id = randomUUID();
+
+          // Process system prompt with field mappings
+          let processedSystemPrompt = campaignData.system_prompt;
+          if (campaignData.field_mappings && contact.contact_data) {
+            Object.entries(campaignData.field_mappings).forEach(([placeholder, fieldName]) => {
+              const value = contact.contact_data[fieldName as string] || '';
+              const pattern = `\\<\\<\\<${placeholder}\\>\\>\\>`;
+              processedSystemPrompt = processedSystemPrompt.replace(
+                new RegExp(pattern, 'g'),
+                value
+              );
+            });
+          }
+
+          // Create call configuration
+          const callConfig = {
+            voice: campaignData.voice_settings?.voice || "d17917ec-fd98-4c50-8c83-052c575cbf3e",
+            temperature: campaignData.voice_settings?.temperature || 0.6,
+            joinTimeout: "30s",
+            maxDuration: "300s",
+            recordingEnabled: true,
+            timeExceededMessage: "I'm sorry, I can't help you with that.",
+            systemPrompt: processedSystemPrompt,
+            medium: { twilio: {} },
+            metadata: {
+              bot_id: campaignData.bot_id,
+              user_id: campaignData.user_id,
+              campaign_id,
+              contact_id: contact.contact_id,
+              job_id
+            },
+            selectedTools: [
+              { toolName: "hangUp" },
+              { toolName: "leaveVoicemail" }
+            ]
+          };
+
+          // Prepare payload for KV buffer
+          const payload = {
+            callConfig,
+            botId: campaignData.bot_id,
+            userId: campaignData.user_id,
+            tools: callConfig.selectedTools,
+            twilioFromNumber: campaignData.twilio_phone_number,
+            twilio_phone_numbers: campaignData.twilio_phone_numbers,
+            toNumber: contact.contact_phone,
+            customerName: contact.contact_name || 'Customer',
+            campaign_id,
+            contact_id: contact.contact_id,
+            campaign_settings: {
+              ...campaignData.campaign_settings,
+              enableNumberLocking: campaignData.twilio_phone_numbers?.length > 1 ? true : (campaignData.campaign_settings?.enableNumberLocking || false)
+            }
+          };
+
+          // Store in KV buffer
+          await concurrencyService.addPendingCall({
+            job_id,
+            payload,
+            queued_at: new Date().toISOString()
+          });
+
+          // Create call job record in DB (marked as pending/buffered)
+          await this.db
+            .from('call_jobs')
+            .insert([{
+              job_id,
+              campaign_id,
+              contact_id: contact.contact_id,
+              user_id: campaignData.user_id,
+              status: 'pending',
+              payload: {
+                campaign_id,
+                contact_id: contact.contact_id,
+                contact_phone: contact.contact_phone,
+                contact_name: contact.contact_name,
+                contact_data: contact.contact_data,
+                bot_id: campaignData.bot_id,
+                bot_name: campaignData.bot_name,
+                twilio_phone_number: campaignData.twilio_phone_number,
+                twilio_phone_numbers: campaignData.twilio_phone_numbers,
+                system_prompt: campaignData.system_prompt,
+                voice_settings: campaignData.voice_settings,
+                field_mappings: campaignData.field_mappings,
+                user_id: campaignData.user_id,
+                campaign_settings: campaignData.campaign_settings || {}
+              }
+            }]);
+
+          // Update contact status - keep as pending since it's buffered
+          // It will be updated to queued when actually sent to the queue
+          bufferedCount++;
+          console.log(`✅ Contact ${bufferedCount}/${contactsToBuffer.length} buffered successfully`);
+        } catch (error) {
+          console.error('❌ Error buffering contact:', contact.contact_id, error);
+        }
       }
+
+      const finalStats = await concurrencyService.getStats();
+      console.log(`📊 Final concurrency stats after campaign start:`, finalStats);
 
       return {
         success: true,
-        message: `Successfully queued ${queuedCount} calls${isNumberLocked ? ` (${contactsData.length - queuedCount} pending)` : ''}`,
-        queued_count: queuedCount
+        message: `Successfully queued ${queuedCount} calls immediately, buffered ${bufferedCount} calls in KV`,
+        queued_count: queuedCount,
+        buffered_count: bufferedCount
       };
 
     } catch (error) {

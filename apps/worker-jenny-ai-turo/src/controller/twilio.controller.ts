@@ -677,6 +677,69 @@ export async function finishCall(c: Context) {
       // Continue with the rest of the function even if webhook notifications fail
     }
 
+    // Decrement concurrency counter and try to pull pending call from KV buffer
+    try {
+      console.log(`📉 Decrementing concurrency counter for finished call: ${call.callId}`);
+      const { ConcurrencyService } = await import('../services/concurrency.service');
+      const concurrencyService = ConcurrencyService.getInstance();
+      concurrencyService.setDependencies(c.req.env);
+
+      // Decrement the concurrency counter
+      const newConcurrency = await concurrencyService.decrementConcurrency();
+      console.log(`📊 Concurrency after decrement: ${newConcurrency}`);
+
+      // Try to pull one pending call from KV buffer and queue it
+      const stats = await concurrencyService.getStats();
+      console.log(`📊 Current concurrency stats:`, stats);
+
+      if (stats.pending_calls > 0 && stats.available_slots > 0) {
+        console.log(`🔄 Attempting to pull pending call from KV buffer (${stats.pending_calls} pending, ${stats.available_slots} slots available)`);
+
+        const pendingCall = await concurrencyService.getNextPendingCall();
+
+        if (pendingCall) {
+          console.log(`✅ Retrieved pending call from buffer: ${pendingCall.job_id}`);
+
+          // Push it to the calls queue
+          try {
+            await c.req.env.calls_que.send({
+              job_id: pendingCall.job_id,
+              payload: pendingCall.payload
+            });
+
+            console.log(`🚀 Successfully queued pending call: ${pendingCall.job_id}`);
+
+            // Update contact status to queued if it's a campaign call
+            if (pendingCall.payload.campaign_id && pendingCall.payload.contact_id) {
+              await c.req.db
+                .from('call_campaign_contacts')
+                .update({
+                  call_status: 'queued',
+                  queued_at: new Date().toISOString(),
+                  error_message: 'Pulled from KV buffer and queued'
+                })
+                .eq('contact_id', pendingCall.payload.contact_id);
+            }
+          } catch (queueError) {
+            console.error(`❌ Failed to queue pending call ${pendingCall.job_id}:`, queueError);
+            // Put it back in the buffer
+            await concurrencyService.addPendingCall(pendingCall);
+          }
+        } else {
+          console.log(`ℹ️ No pending calls available in buffer`);
+        }
+      } else {
+        if (stats.pending_calls === 0) {
+          console.log(`ℹ️ No pending calls in buffer`);
+        } else {
+          console.log(`⚠️ No available concurrency slots (${stats.active_calls}/${stats.max_concurrency})`);
+        }
+      }
+    } catch (concurrencyError) {
+      console.error('❌ Error managing concurrency after call finish:', concurrencyError);
+      // Continue with the rest of the function even if this fails
+    }
+
     // Create a promise that resolves when the operation is complete
     if(call && call.endReason !== 'unjoined'){
       try {
