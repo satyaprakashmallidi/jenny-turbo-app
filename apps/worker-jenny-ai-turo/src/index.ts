@@ -1024,37 +1024,64 @@ app.get('/api/voices', async (c) => {
       });
     }
 
-    const response = await fetch('https://api.ultravox.ai/api/voices', {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': c.req.env.ULTRAVOX_API_KEY,
-      },
-    });
+    // Function to fetch all voices with pagination
+    const fetchAllVoices = async () => {
+      let allVoices: any[] = [];
+      let nextUrl = 'https://api.ultravox.ai/api/voices';
+      
+      while (nextUrl) {
+        console.log(`Fetching voices from: ${nextUrl}`);
+        
+        const response = await fetch(nextUrl, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': c.req.env.ULTRAVOX_API_KEY,
+          },
+        });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Ultravox API error:", errorText);
-      return c.json({
-        status: 'error',
-        message: 'Ultravox API error',
-      }, 500);
-    }
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("Ultravox API error:", errorText);
+          throw new Error(`Ultravox API error: ${errorText}`);
+        }
 
-    const data = await response.json();
-    //@ts-ignore
-    const voices = data?.results?.map((voice: any) => ({
-      voiceId: voice.voiceId,
-      name: voice.name,
-      previewUrl: voice.previewUrl,
-    }));
+        const data = await response.json() as any;
+        
+        // Add voices from current page
+        if (data?.results && Array.isArray(data.results)) {
+          const pageVoices = data.results.map((voice: any) => ({
+            voiceId: voice.voiceId,
+            name: voice.name,
+            previewUrl: voice.previewUrl,
+          }));
+          allVoices.push(...pageVoices);
+          console.log(`Fetched ${pageVoices.length} voices from current page. Total so far: ${allVoices.length}`);
+        }
+        
+        // Check if there's a next page
+        nextUrl = data?.next || null;
+        
+        if (nextUrl) {
+          console.log(`Next page available: ${nextUrl}`);
+        } else {
+          console.log("No more pages to fetch");
+        }
+      }
+      
+      return allVoices;
+    };
+
+    const voices = await fetchAllVoices();
+    console.log(`Total voices fetched: ${voices.length}`);
 
     cachedVoices = voices;
     lastCacheTime = now;
 
     return c.json({
       status: 'success',
-      data: voices
+      data: voices,
+      total: voices.length
     });
   } catch (error) {
     console.error("Fetching Voices Error:", error);
