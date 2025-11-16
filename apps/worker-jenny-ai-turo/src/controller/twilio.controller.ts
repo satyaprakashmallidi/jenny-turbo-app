@@ -52,17 +52,51 @@ export async function makeCall(c: Context) {
 
     console.log("Call Config", callConfig);
 
-    // if(!callConfig?.experimentalSettings){
-    //   callConfig.experimentalSettings = {
-    //     backSeatDriver: true,
-    //     model: "o4-mini",
-    //     enableFunctionInsertion: true,
-    //   }
-    // }
+    // Fetch bot data to check if it's an agent-based bot
+    const { data: botData, error: botError } = await c.req.db
+      .from('bots')
+      .select('is_agent, ultravox_agent_id, knowledge_base_id, is_realtime_capture_enabled, realtime_capture_fields')
+      .eq('id', botId)
+      .single();
 
+    if (botError) {
+      console.error("Error fetching bot data:", botError);
+      return c.json({
+        status: 'error',
+        message: 'Failed to fetch bot configuration',
+      }, 500);
+    }
 
+    // Check if this bot uses Ultravox Agents API
+    if (botData?.is_agent && botData?.ultravox_agent_id) {
+      console.log("[MakeCall] Using Ultravox Agent API for bot:", botData.ultravox_agent_id);
+
+      // Use agent-based call (new approach)
+      const result = await twilioService.makeCallWithAgent({
+        agentId: botData.ultravox_agent_id,
+        botId,
+        toNumber,
+        twilioFromNumber,
+        userId,
+        transferTo,
+        supabase: c.req.db,
+        env: c.req.env,
+        knowledgeBaseId: botData.knowledge_base_id,
+        isRealtimeCaptureEnabled: botData.is_realtime_capture_enabled,
+        realtimeCaptureFields: botData.realtime_capture_fields,
+        enableNumberLocking
+      });
+
+      return c.json({
+        status: 'success',
+        data: result
+      });
+    }
+
+    // Use direct call API (backward compatibility for old bots)
+    console.log("[MakeCall] Using direct call API (no agent configured)");
     console.log("Transfering call to: ", transferTo);
-    
+
     const result = await twilioService.makeCall({
       callConfig,
       botId,

@@ -144,7 +144,7 @@ app.get('/api/inbound', async (c) => {
   const bot = data[0];
 
   console.log("Bot Data", bot);
-  const { voice , system_prompt , name , temperature , is_appointment_booking_allowed ,twilio_phone_number , appointment_tool_id , knowledge_base_id , is_call_transfer_allowed , call_transfer_number } = bot;
+  const { voice , system_prompt , name , temperature , is_appointment_booking_allowed ,twilio_phone_number , appointment_tool_id , knowledge_base_id , is_call_transfer_allowed , call_transfer_number , is_agent , ultravox_agent_id } = bot;
 
   let tools = [{
     toolName: "hangUp"
@@ -227,18 +227,43 @@ app.get('/api/inbound', async (c) => {
 
   twilioService.setDependencies(c.req.db, c.req.env);
 
-  const result = await twilioService.makeInboundCall({
-    callConfig,
-    botId,
-    userId,
-    tools,
-    supabase: c.req.db,
-    env: c.req.env,
-    temperature: temperature>0 ? Number(`0.${temperature}`) : 0,
-    callSid: callSid as string,
-    twilioFromNumber: twilio_phone_number,
-    transferTo: is_call_transfer_allowed ? call_transfer_number : undefined,
-  })
+  let result;
+
+  // Check if this bot uses Ultravox Agents API
+  if (is_agent && ultravox_agent_id) {
+    console.log("[Inbound] Using Ultravox Agent API for bot:", ultravox_agent_id);
+
+    // Use agent-based call (new approach)
+    result = await twilioService.makeInboundCallWithAgent({
+      agentId: ultravox_agent_id,
+      botId,
+      userId,
+      callSid: callSid as string,
+      twilioFromNumber: twilio_phone_number,
+      transferTo: is_call_transfer_allowed ? call_transfer_number : undefined,
+      supabase: c.req.db,
+      env: c.req.env,
+      knowledgeBaseId: knowledge_base_id,
+      isRealtimeCaptureEnabled,
+      realtimeCaptureFields,
+    });
+  } else {
+    console.log("[Inbound] Using direct call API (legacy bot)");
+
+    // Use direct call API (backward compatibility for old bots)
+    result = await twilioService.makeInboundCall({
+      callConfig,
+      botId,
+      userId,
+      tools,
+      supabase: c.req.db,
+      env: c.req.env,
+      temperature: temperature>0 ? Number(`0.${temperature}`) : 0,
+      callSid: callSid as string,
+      twilioFromNumber: twilio_phone_number,
+      transferTo: is_call_transfer_allowed ? call_transfer_number : undefined,
+    });
+  }
 
   // const response = await fetch('https://api.ultravox.ai/api/calls', {
   //   method: 'POST',
@@ -914,6 +939,48 @@ app.post('/api/ultravox/createcall', async (c) => {
       }, 500);
     }
 
+    // Check if this is an agent-based call
+    if (body.agentId) {
+      console.log("[CreateCall] Using Ultravox Agent API for agent:", body.agentId);
+
+      // Import and initialize the agent service
+      const { UltravoxAgentService } = await import('./services/ultravox-agent.service');
+      const agentService = UltravoxAgentService.getInstance(c.req.env, c.req.db);
+
+      // Build the agent call request from the body
+      const agentCallRequest: any = {
+        metadata: body.metadata,
+        maxDuration: body.maxDuration,
+        recordingEnabled: body.recordingEnabled,
+        medium: body.medium,
+        joinTimeout: body.joinTimeout,
+      };
+
+      // Add optional fields if present
+      if (body.initialMessages) {
+        agentCallRequest.initialMessages = body.initialMessages;
+      }
+      if (body.firstSpeakerSettings) {
+        agentCallRequest.firstSpeakerSettings = body.firstSpeakerSettings;
+      }
+
+      // Create call using agent API
+      const agentCallResponse = await agentService.createCallWithAgent(
+        body.agentId,
+        agentCallRequest
+      );
+
+      console.log("[CreateCall] Agent call created successfully:", agentCallResponse.callId);
+
+      return c.json({
+        status: 'success',
+        data: agentCallResponse
+      });
+    }
+
+    // Use direct call API (backward compatibility for non-agent bots)
+    console.log("[CreateCall] Using direct call API (no agentId provided)");
+
     // if(!body?.firstSpeaker){
     //   body.firstSpeaker = "FIRST_SPEAKER_USER";
     // }
@@ -927,7 +994,7 @@ app.post('/api/ultravox/createcall', async (c) => {
     }
 
     body.selectedTools = body.selectedTools || [];
-    
+
     // Add realtime capture tool if bot has it enabled
     if (body.metadata?.botId) {
       const { data: botData, error } = await c.req.db
@@ -938,12 +1005,12 @@ app.post('/api/ultravox/createcall', async (c) => {
 
       if (!error && botData?.is_realtime_capture_enabled && botData?.realtime_capture_fields) {
         const realtimeCaptureFields = botData.realtime_capture_fields as any[];
-        
+
         // Generate dynamic parameters for the captureOutcome tool
         const dynamicParameters = realtimeCaptureFields.map(field => ({
           name: field.name,
           location: "PARAMETER_LOCATION_BODY",
-          schema: field.type === 'text' 
+          schema: field.type === 'text'
             ? { type: "string", description: field.description }
             : field.type === 'number'
             ? { type: "number", description: field.description }
@@ -978,7 +1045,7 @@ app.post('/api/ultravox/createcall', async (c) => {
         body.selectedTools.push(captureOutcomeTool);
       }
     }
-    
+
     const response = await fetch('https://api.ultravox.ai/api/calls', {
       method: 'POST',
       headers: {
