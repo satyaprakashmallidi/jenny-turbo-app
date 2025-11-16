@@ -100,6 +100,20 @@ app.get('/api/inbound', async (c) => {
   const callSid = c.req.query('CallSid');
   const accountSid = c.req.query('AccountSid');
 
+  // Extract caller information from Twilio webhook parameters
+  const callerNumber = c.req.query('Caller') || c.req.query('From');
+  const callerCountry = c.req.query('CallerCountry') || c.req.query('FromCountry');
+  const callerState = c.req.query('CallerState') || c.req.query('FromState');
+  const callerCity = c.req.query('CallerCity') || c.req.query('FromCity');
+  const callerZip = c.req.query('CallerZip') || c.req.query('FromZip');
+  
+  // Extract called number information
+  const calledNumber = c.req.query('Called') || c.req.query('To');
+  const calledCountry = c.req.query('CalledCountry') || c.req.query('ToCountry');
+  const calledState = c.req.query('CalledState') || c.req.query('ToState');
+  const calledCity = c.req.query('CalledCity') || c.req.query('ToCity');
+  const calledZip = c.req.query('CalledZip') || c.req.query('ToZip');
+
   const errorResponse = ` <Response>
       <Say voice="alice">Sorry we are currently under maintenance , please call again later</Say>
     </Response>`
@@ -218,7 +232,17 @@ app.get('/api/inbound', async (c) => {
     //@ts-ignore
     metadata: {
       bot_id: botId,
-      user_id: userId
+      user_id: userId,
+      caller_number: callerNumber,
+      caller_country: callerCountry,
+      caller_state: callerState,
+      caller_city: callerCity,
+      caller_zip: callerZip,
+      called_number: calledNumber,
+      called_country: calledCountry,
+      called_state: calledState,
+      called_city: calledCity,
+      called_zip: calledZip
     },
     selectedTools: tools
   };
@@ -246,6 +270,18 @@ app.get('/api/inbound', async (c) => {
       knowledgeBaseId: knowledge_base_id,
       isRealtimeCaptureEnabled,
       realtimeCaptureFields,
+      callerMetadata: {
+        caller_number: callerNumber as string,
+        caller_country: callerCountry as string,
+        caller_state: callerState as string,
+        caller_city: callerCity as string,
+        caller_zip: callerZip as string,
+        called_number: calledNumber as string,
+        called_country: calledCountry as string,
+        called_state: calledState as string,
+        called_city: calledCity as string,
+        called_zip: calledZip as string,
+      },
     });
   } else {
     console.log("[Inbound] Using direct call API (legacy bot)");
