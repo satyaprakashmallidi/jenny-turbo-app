@@ -160,9 +160,21 @@ export class TwilioService {
         callSid: string;
         transferTo?: string;
         isSingleTwilioAccount?: boolean;
+        callerMetadata?: {
+            caller_number?: string;
+            caller_country?: string;
+            caller_state?: string;
+            caller_city?: string;
+            caller_zip?: string;
+            called_number?: string;
+            called_country?: string;
+            called_state?: string;
+            called_city?: string;
+            called_zip?: string;
+        };
     }) : Promise<{joinUrl: string}> {
 
-        const { botId,  twilioFromNumber, userId, tools, supabase, env, temperature, transferTo, isSingleTwilioAccount, callConfig : call_config , callSid } = params;
+        const { botId,  twilioFromNumber, userId, tools, supabase, env, temperature, transferTo, isSingleTwilioAccount, callConfig : call_config , callSid, callerMetadata } = params;
 
         let account_sid = "";
         let auth_token = "";
@@ -247,6 +259,21 @@ export class TwilioService {
             });
         }
 
+        const metadata: Record<string, string> = {
+            bot_id: botId,
+            user_id: userId,
+            ...(callerMetadata?.caller_number && { caller_number: callerMetadata.caller_number }),
+            ...(callerMetadata?.caller_country && { caller_country: callerMetadata.caller_country }),
+            ...(callerMetadata?.caller_state && { caller_state: callerMetadata.caller_state }),
+            ...(callerMetadata?.caller_city && { caller_city: callerMetadata.caller_city }),
+            ...(callerMetadata?.caller_zip && { caller_zip: callerMetadata.caller_zip }),
+            ...(callerMetadata?.called_number && { called_number: callerMetadata.called_number }),
+            ...(callerMetadata?.called_country && { called_country: callerMetadata.called_country }),
+            ...(callerMetadata?.called_state && { called_state: callerMetadata.called_state }),
+            ...(callerMetadata?.called_city && { called_city: callerMetadata.called_city }),
+            ...(callerMetadata?.called_zip && { called_zip: callerMetadata.called_zip }),
+        };
+
         const callConfig : CallConfig = {
             voice,
             systemPrompt: system_prompt,
@@ -259,10 +286,7 @@ export class TwilioService {
                 }
             },
             //@ts-ignore
-            metadata: {
-                bot_id: botId,
-                user_id: userId
-            }
+            metadata
         }
 
         const ultravoxResponse = await fetch('https://api.ultravox.ai/api/calls', {

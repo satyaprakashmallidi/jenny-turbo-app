@@ -298,6 +298,18 @@ app.get('/api/inbound', async (c) => {
       callSid: callSid as string,
       twilioFromNumber: twilio_phone_number,
       transferTo: is_call_transfer_allowed ? call_transfer_number : undefined,
+      callerMetadata: {
+        caller_number: callerNumber as string,
+        caller_country: callerCountry as string,
+        caller_state: callerState as string,
+        caller_city: callerCity as string,
+        caller_zip: callerZip as string,
+        called_number: calledNumber as string,
+        called_country: calledCountry as string,
+        called_state: calledState as string,
+        called_city: calledCity as string,
+        called_zip: calledZip as string,
+      },
     });
   }
 
