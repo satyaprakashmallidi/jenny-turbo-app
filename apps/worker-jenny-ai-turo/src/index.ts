@@ -984,8 +984,24 @@ app.delete('/api/tools/:toolId', async (c) => {
 
 app.post('/api/twilio/transfer-call', async (c) => {
   try {
+    console.log("=== /api/twilio/transfer-call ENDPOINT CALLED ===");
     const body = await c.req.json();
     const callId = c.req.query('call_id');
+    const transferTo = c.req.query('transferTo');
+
+    console.log("Request Body:", JSON.stringify(body, null, 2));
+    console.log("Call ID from query:", callId);
+    console.log("Transfer To from query:", transferTo);
+    console.log("All query params:", c.req.query());
+
+    if (!callId) {
+      console.error("ERROR: No call_id provided in query parameters");
+      return c.json({
+        status: 'error',
+        message: 'call_id is required in query parameters',
+      }, 400);
+    }
+
     const twilioService = TwilioService.getInstance();
     const result = await twilioService.transferCall(body, callId);
     return c.json({
@@ -1005,6 +1021,9 @@ app.post('/api/twilio/call', async (c) => {
   try {
     const supabase = getSupabaseClient(c.env);
     const body = await c.req.json();
+
+    console.log("=== /api/twilio/call ENDPOINT CALLED ===");
+
     const {
       bot_id: botId,
       to_number: toNumber,
@@ -1013,6 +1032,8 @@ app.post('/api/twilio/call', async (c) => {
       placeholders,
       tools
     } = body;
+
+    console.log("Creating call from:", twilioFromNumber, "to:", toNumber);
 
     const twilioService = TwilioService.getInstance();
     const result = await twilioService.makeCall({
