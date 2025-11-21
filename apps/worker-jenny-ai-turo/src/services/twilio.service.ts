@@ -17,13 +17,14 @@ type CallRecord = {
         to_number: string;
         user_id: string;
     };
-    transferTo?: string | "+919014325088";
+    transferTo?: string;
     numberLockingEnabled?: boolean;
 };
 
 type UrgencyLevel = 'low' | 'medium' | 'high';
 
 interface TransferCallRequest {
+    transferToNumber: string; // Dynamic phone number from user
     transferReason: string;
     urgencyLevel: UrgencyLevel;
 }
@@ -803,7 +804,7 @@ export class TwilioService {
         twilioFromNumbers?: string[]; // Array of available numbers
         userId: string;
         placeholders?: Record<string, string>;
-        tools: string[];
+        tools: SelectedTool[];
         supabase: SupabaseClient;
         env: Env;
         transferTo?: string;
@@ -813,7 +814,9 @@ export class TwilioService {
     }) {
         const { botId, toNumber, twilioFromNumber, twilioFromNumbers, userId, placeholders, tools, supabase, env, isSingleTwilioAccount, callConfig : call_config, configureBots, enableNumberLocking } = params;
         let transferTo = params.transferTo;
-        console.log("calling ", toNumber  ,"with locking" , twilioFromNumber , twilioFromNumbers, enableNumberLocking);
+        console.log("=== TwilioService makeCall ===");
+        console.log("From:", twilioFromNumber);
+        console.log("To:", toNumber);
         
         let account_sid = "";
         let auth_token = "";
@@ -1063,33 +1066,52 @@ export class TwilioService {
             system_prompt = system_prompt.replace(regexPattern, (match: string, key: string) => placeholders[key] || match);
         }
 
-        interface ToolItem {
-            toolName?: string;
-            toolId?: string;
-            parameterOverrides?: Record<string, any>;
-            [key: string]: any; 
-        }
-        
-        let processedTools: ToolItem[] = [];
-        if (tools && Array.isArray(tools)) {
-            processedTools = tools.map((tool: any) => {
-                if(typeof tool === 'object' && tool !== null){
-                    return tool as ToolItem;
+        // Tools are already in the correct SelectedTool[] format from the frontend
+        const selectedTools = tools || [];
+
+        // Helper function to get tool identifier
+        const getToolIdentifier = (tool: SelectedTool): string => {
+            return tool.toolName || tool.temporaryTool?.modelToolName || tool.toolId || '';
+        };
+
+        // Helper to check if tool is a temporaryTool (more complete than simple toolName)
+        const isTemporaryTool = (tool: SelectedTool): boolean => {
+            return !!tool.temporaryTool;
+        };
+
+        // Deduplicate tools - prioritize temporaryTools over simple toolName references
+        const toolMap = new Map<string, SelectedTool>();
+
+        // First, process selectedTools from frontend (they take priority)
+        for (const tool of selectedTools) {
+            const identifier = getToolIdentifier(tool);
+            if (identifier) {
+                const existing = toolMap.get(identifier);
+                // Keep the tool if it's new, or if it's a temporaryTool replacing a simple one
+                if (!existing || (isTemporaryTool(tool) && !isTemporaryTool(existing))) {
+                    toolMap.set(identifier, tool);
                 }
-                if (typeof tool === 'object' && tool !== null && tool.toolName) {
-                    return tool as ToolItem;
-                }
-                if (typeof tool === 'string') {
-                    return { toolId: tool } as ToolItem;
-                }
-                return null;
-            }).filter(Boolean) as ToolItem[]; 
+            }
         }
 
-        if(configureBots){
-            const tools = await this.configureBotTools(botId , userId , supabase, toNumber);
-            processedTools.push(...tools);
+        // Then add default tools only if not already present
+        const defaultTools: SelectedTool[] = [
+            { toolName: "hangUp" },
+            { toolName: "transferCall" }
+        ];
+
+        for (const tool of defaultTools) {
+            const identifier = getToolIdentifier(tool);
+            if (identifier && !toolMap.has(identifier)) {
+                toolMap.set(identifier, tool);
+            }
         }
+
+        const deduplicatedTools = Array.from(toolMap.values());
+
+        console.log("Tools before deduplication:", selectedTools.length + defaultTools.length);
+        console.log("Tools after deduplication:", deduplicatedTools.length);
+        console.log("Deduplicated tool names:", Array.from(toolMap.keys()));
 
         let callConfig: CallConfig = {
             systemPrompt: system_prompt,
@@ -1099,10 +1121,7 @@ export class TwilioService {
             medium: {
                 twilio: {}
             },
-            selectedTools: [
-                { toolName: "transferCall" },
-                ...processedTools
-            ],
+            selectedTools: deduplicatedTools,
             //@ts-ignore
             firstSpeaker: bot.first_speaker,
             metadata: {
@@ -1331,6 +1350,8 @@ export class TwilioService {
             numberLockingEnabled: enableNumberLocking || false
         });
 
+        console.log("Stored call record for call ID:", ultravoxCallId);
+
         return {
             from_number: selectedTwilioNumber,
             to_number: toNumber,
@@ -1341,39 +1362,86 @@ export class TwilioService {
     }
 
     async transferCall(body: TransferCallRequest, callId: string) {
-        const { transferReason, urgencyLevel } = body;
+        console.log("=== TRANSFER CALL STARTED ===");
+        console.log("Call ID:", callId);
+        console.log("Transfer Request Body:", JSON.stringify(body, null, 2));
 
-        console.log("Transfer Call Request: ", body);
+        const { transferToNumber, transferReason, urgencyLevel } = body;
+        console.log("Parsed Transfer Call Request:");
+        console.log(body);
+        console.log("Transfer To Number (from user):", transferToNumber);
+        console.log("Transfer Reason:", transferReason);
+        console.log("Urgency Level:", urgencyLevel);
+
+        // Validate the transfer number
+        if (!transferToNumber || transferToNumber === '' || transferToNumber === 'undefined') {
+            console.error("=== TRANSFER CALL ERROR: No transfer number provided ===");
+            console.error("Body received:", body);
+            console.error("AI called transferCall tool WITHOUT collecting phone number from user!");
+            throw new Error('Transfer destination number not provided. AI must ask user for phone number before calling this tool.');
+        }
+
+        // Validate E.164 format
+        if (!transferToNumber.startsWith('+')) {
+            console.error("=== TRANSFER CALL ERROR: Invalid phone format ===");
+            console.error("Provided number:", transferToNumber);
+            throw new Error('Transfer number must be in E.164 format (start with + and country code)');
+        }
 
         // Get call data from KV
         const call = await this.getCallData(callId);
         if (!call) {
-            console.error("Call not found:", callId);
+            console.error("=== TRANSFER CALL ERROR: Call Not Found ===");
+            console.error("Call ID:", callId);
             throw new Error('Call not found');
         }
 
-        console.log("Call data transfer call: ", call);
-
-        const { transferTo } = call;
-
-        console.log("Transfering the call to: ", transferTo);
-
+        console.log("Call found in active calls");
         const { config: callConfig, twilioData, joinUrlResponse, twilioResponseData } = call;
 
-        const client = twilio(twilioData.account_sid, twilioData.auth_token);
-        const twiml = new VoiceResponse();
-        twiml.dial().number(transferTo as string);
-
-        const UpdatedCall = await client.calls(twilioResponseData.sid).update({
-            twiml: twiml.toString()
+        console.log("Twilio Data:", {
+            account_sid: twilioData.account_sid,
+            from_phone_number: twilioData.from_phone_number,
+            to_number: twilioData.to_number
         });
+        console.log("Twilio Response Data SID:", twilioResponseData.sid);
 
-        console.log("UpdatedCall: ", UpdatedCall);
+        // Use the dynamic transfer number from the request
+        const transferNumber = transferToNumber;
+        console.log("Using dynamic transfer destination:", transferNumber);
 
-        this.deleteCallData(callId);
+        // Initialize Twilio client
+        console.log("Initializing Twilio client...");
+        const client = twilio(twilioData.account_sid, twilioData.auth_token);
 
+        // Create TwiML for transfer
+        console.log("Creating TwiML for transfer...");
+        const twiml = new VoiceResponse();
+        console.log("Transfer destination number:", transferNumber);
+
+        twiml.dial().number(transferNumber);
+        const twimlString = twiml.toString();
+        console.log("Generated TwiML:", twimlString);
+
+        // Update the call with new TwiML
+        console.log("Updating Twilio call with transfer TwiML...");
+        try {
+            const UpdatedCall = await client.calls(twilioResponseData.sid).update({
+                twiml: twimlString
+            });
+            console.log("Call updated successfully");
+            console.log("Updated Call Status:", UpdatedCall.status);
+            console.log("Updated Call SID:", UpdatedCall.sid);
+        } catch (error) {
+            console.error("=== ERROR UPDATING TWILIO CALL ===");
+            console.error("Error details:", error);
+            throw error;
+        }
+
+        console.log("=== TRANSFER CALL COMPLETED ===");
         return {
             callId,
+            transferToNumber: transferNumber,
             transferReason,
             urgencyLevel,
             status: 'transferring'
