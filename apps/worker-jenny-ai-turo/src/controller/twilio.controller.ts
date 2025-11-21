@@ -31,6 +31,7 @@ export type CallDetails = {
 
 export async function makeCall(c: Context) {
   try {
+    console.log("=== /api/twilio/call ENDPOINT CALLED ===");
     const body = await c.req.json();
     const {
       callConfig: callConfig,
@@ -70,6 +71,7 @@ export async function makeCall(c: Context) {
     // Check if this bot uses Ultravox Agents API
     if (botData?.is_agent && botData?.ultravox_agent_id) {
       console.log("[MakeCall] Using Ultravox Agent API for bot:", botData.ultravox_agent_id);
+      console.log("Creating call from:", twilioFromNumber, "to:", toNumber);
 
       // Use agent-based call (new approach)
       const result = await twilioService.makeCallWithAgent({
@@ -96,6 +98,7 @@ export async function makeCall(c: Context) {
     // Use direct call API (backward compatibility for old bots)
     console.log("[MakeCall] Using direct call API (no agent configured)");
     console.log("Transfering call to: ", transferTo);
+    console.log("Creating call from:", twilioFromNumber, "to:", toNumber);
 
     const result = await twilioService.makeCall({
       callConfig,
@@ -128,8 +131,24 @@ export async function makeCall(c: Context) {
 
 export async function transferCall(c: Context) {
   try {
+    console.log("=== /api/twilio/transfer-call ENDPOINT CALLED ===");
     const body = await c.req.json();
     const callId = c.req.query('call_id');
+    const transferTo = c.req.query('transferTo');
+
+    console.log("Request Body:", JSON.stringify(body, null, 2));
+    console.log("Call ID from query:", callId);
+    console.log("Transfer To from query:", transferTo);
+    console.log("All query params:", c.req.query());
+
+    if (!callId) {
+      console.error("ERROR: No call_id provided in query parameters");
+      return c.json({
+        status: 'error',
+        message: 'call_id is required in query parameters',
+      }, 400);
+    }
+    
     const twilioService = TwilioService.getInstance();
     twilioService.setDependencies(c.req.db, c.req.env);
     const result = await twilioService.transferCall(body, callId || "");
@@ -373,11 +392,11 @@ export async function finishCall(c: Context) {
   try {
     const body = await c.req.json();
 
-    const { event , call } = body;
+    const { event, call } = body;
 
-    console.log( "Event", event , "Call", call);
+    console.log("Event", event, "Call", call);
     console.log("📋 Call metadata received:", call?.metadata);
-    
+
     // if(event && call){
     //   console.log("inside event call");
     //   // we only subscribed to event = call.ended let's see
@@ -414,7 +433,7 @@ export async function finishCall(c: Context) {
     //       console.log("✅ Successfully imported call details to db");
     //   }
     // }
-    
+
     const twilioService = TwilioService.getInstance();
     twilioService.setDependencies(c.req.db, c.req.env);
 
@@ -433,13 +452,13 @@ export async function finishCall(c: Context) {
     //     // First try to find by ultravox_call_id
     //     let jobData = null;
     //     let jobError = null;
-        
+
     //     const { data: jobByCallId, error: errorByCallId } = await c.req.db
     //       .from('call_jobs')
     //       .select('campaign_id, contact_id, job_id, payload')
     //       .eq('ultravox_call_id', call.callId)
     //       .single();
-        
+
     //     if (!errorByCallId && jobByCallId) {
     //       jobData = jobByCallId;
     //       console.log("✅ Found job by ultravox_call_id");
@@ -451,7 +470,7 @@ export async function finishCall(c: Context) {
     //         .select('campaign_id, contact_id, job_id, payload')
     //         .eq('job_id', job_id)
     //         .single();
-          
+
     //       if (!errorByJobId && jobByJobId) {
     //         jobData = jobByJobId;
     //         console.log("✅ Found job by job_id");
@@ -466,7 +485,7 @@ export async function finishCall(c: Context) {
     //         .select('campaign_id, contact_id')
     //         .eq('ultravox_call_id', call.callId)
     //         .single();
-          
+
     //       if (!errorContactByCallId && contactByCallId) {
     //         campaign_id = contactByCallId.campaign_id;
     //         contact_id = contactByCallId.contact_id;
@@ -480,13 +499,13 @@ export async function finishCall(c: Context) {
     //       campaign_id = campaign_id || jobData.campaign_id;
     //       contact_id = contact_id || jobData.contact_id;
     //       job_id = job_id || jobData.job_id;
-          
+
     //       // Also check the payload for campaign metadata
     //       if (jobData.payload) {
     //         campaign_id = campaign_id || jobData.payload.campaign_id;
     //         contact_id = contact_id || jobData.payload.contact_id;
     //       }
-          
+
     //       console.log("✅ Found campaign data from database:", { campaign_id, contact_id, job_id });
     //     } else if (!campaign_id || !contact_id) {
     //       console.log("❌ No matching job found in database:", jobError?.message);
@@ -499,7 +518,7 @@ export async function finishCall(c: Context) {
     // Update campaign contact status BEFORE pricing operations
     if (campaign_id && contact_id) {
       console.log("📞 Processing campaign contact update:", { campaign_id, contact_id, callId: call.callId });
-      
+
       // Calculate call duration from joined to ended timestamps
       let callDuration = 0;
       if (call.joined && call.ended) {
@@ -510,7 +529,7 @@ export async function finishCall(c: Context) {
 
       // Determine call status based on call details and duration
       let callStatus = 'completed';
-      
+
       // If call duration is very short (less than 5 seconds), likely failed/no answer
       if (!call.joined && call.ended) {
         callStatus = 'unjoined';
@@ -538,7 +557,7 @@ export async function finishCall(c: Context) {
 
       try {
         console.log("📝 Updating campaign contact with data:", updateData);
-        
+
         // Update the campaign contact
         const { error: contactUpdateError } = await c.req.db
           .from('call_campaign_contacts')
@@ -556,7 +575,7 @@ export async function finishCall(c: Context) {
             call_duration: updateData.call_duration,
             has_summary: !!updateData.call_summary
           });
-          
+
           // Check if all contacts in the campaign are completed and update campaign status
           console.log("🔄 Checking if campaign should be marked as completed...");
           try {
@@ -775,13 +794,13 @@ export async function finishCall(c: Context) {
     }
 
     // Create a promise that resolves when the operation is complete
-    if(call && call.endReason !== 'unjoined'){
+    if (call && call.endReason !== 'unjoined') {
       try {
         console.log(`🔚 Call ending - CallID: ${call.callId}, EndReason: ${call.endReason}`);
-        const response = await twilioService.finishCall({...body , supabaseClient : c.req.db});
-        console.log("Background finishCall completed successfully" , response);
-        
-        if(!response) {
+        const response = await twilioService.finishCall({ ...body, supabaseClient: c.req.db });
+        console.log("Background finishCall completed successfully", response);
+
+        if (!response) {
           console.error("Background finishCall error: Missing response");
           // Continue with the rest of the process even if twilioService.finishCall fails
         }
@@ -793,23 +812,23 @@ export async function finishCall(c: Context) {
         console.log("💰 Processing pricing update:", { userId, TimeTaken, callId });
 
         // Only update pricing if we have the necessary data
-        if(userId && TimeTaken && callId) {
+        if (userId && TimeTaken && callId) {
           try {
             const timeInSeconds = Math.ceil(TimeTaken / 1000); // Convert ms to seconds
             console.log("Updating pricing for user", userId, "reducing time by", timeInSeconds, "seconds");
 
             // Use Postgres decrement operation
             const { data: pricing, error } = await c.req.db.rpc(
-                'decrement_time_rem',
-                { user_id_param: userId, seconds_to_subtract: timeInSeconds }
+              'decrement_time_rem',
+              { user_id_param: userId, seconds_to_subtract: timeInSeconds }
             );
 
-            if(error){
-                console.error("❌ Error updating pricing:", error);
+            if (error) {
+              console.error("❌ Error updating pricing:", error);
             } else {
               console.log("✅ Successfully updated pricing. New time_rem:", pricing);
             }
-            
+
             twilioService.deleteCall(callId);
             console.log("🗑️ Call cleanup completed");
           } catch (pricingError) {
@@ -824,10 +843,10 @@ export async function finishCall(c: Context) {
           }
         }
 
-        
+
       } catch (error) {
         console.error("Background finishCall error:", error);
-        
+
       }
     }
     // Immediately return success response
