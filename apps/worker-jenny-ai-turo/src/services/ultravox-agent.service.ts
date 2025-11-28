@@ -299,7 +299,7 @@ export class UltravoxAgentService {
       medium: {
         twilio: {},
       },
-      selectedTools: [],
+      selectedTools: bot.selected_tools?.map(toolName => ({ toolName })) || [],
     };
 
     // Sanitize the agent name to match Ultravox requirements

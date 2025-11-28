@@ -47,6 +47,12 @@ export async function makeCall(c: Context) {
     } = body;
 
     console.log("Body", body);
+    console.log("=== DETAILED PARAMETER LOGGING ===");
+    console.log("from_number (twilioFromNumber):", twilioFromNumber);
+    console.log("to_number (toNumber):", toNumber);
+    console.log("bot_id:", botId);
+    console.log("user_id:", userId);
+    console.log("=== END PARAMETER LOGGING ===");
 
     const twilioService = TwilioService.getInstance();
     twilioService.setDependencies(c.req.db, c.req.env);
@@ -148,7 +154,7 @@ export async function transferCall(c: Context) {
         message: 'call_id is required in query parameters',
       }, 400);
     }
-    
+
     const twilioService = TwilioService.getInstance();
     twilioService.setDependencies(c.req.db, c.req.env);
     const result = await twilioService.transferCall(body, callId || "");

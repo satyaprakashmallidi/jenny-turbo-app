@@ -15,11 +15,24 @@ declare module 'hono' {
 
 const corsOptions = {
   origin: (origin: string) => {
-    const ALLOWED_ORIGINS = ['http://localhost:3000', 'https://magicteams.netlify.app', 'http://localhost:8080' , "https://mind-dost.vercel.app" , "https://app.magicteams.ai"]
+    const ALLOWED_ORIGINS = [
+      'http://localhost:3000',
+      'https://magicteams.netlify.app',
+      'http://localhost:8080',
+      "https://mind-dost.vercel.app",
+      "https://app.magicteams.ai",
+      "https://d12ae112dc27.ngrok-free.app"  // ✅ Added ngrok URL
+    ]
     return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
   },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'x-user-id','Access-Control-Allow-Methods'],
+  allowHeaders: [
+    'Content-Type',
+    'Authorization',
+    'x-user-id',
+    'Access-Control-Allow-Methods',
+    'ngrok-skip-browser-warning'  // ✅ Added ngrok bypass header
+  ],
   allowCredentials: true,
   maxAge: 300,
 }
@@ -73,11 +86,11 @@ const injectDB = createMiddleware(async (c, next) => {
 
 export function createApp() {
   const app = new Hono<{ Bindings: Env }>();
-  
+
   app.use('/*', cors(corsOptions))
   app.use('/*', errorHandler)
   app.use('/*', injectEnv)
   app.use('/*', injectDB)
-  
+
   return app;
 }

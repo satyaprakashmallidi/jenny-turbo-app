@@ -4,7 +4,7 @@ import { getSupabaseClient } from "../lib/supabase/client";
 import { UltravoxAgentService } from "../services/ultravox-agent.service";
 
 export const createAgent = async (c: Context) => {
-  try{
+  try {
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
     const body = await c.req.json()
@@ -19,21 +19,21 @@ export const createAgent = async (c: Context) => {
       selected_tools = []
     } = body
 
-    if (!name  || !user_id || !voice_id || !system_prompt) {
-      console.error("Recevied /agent/createAgent Error : Missing parameters",{
-        name : name,
-        user_id : user_id,
-        voice_id : voice_id,
-        system_prompt : system_prompt
+    if (!name || !user_id || !voice_id || !system_prompt) {
+      console.error("Recevied /agent/createAgent Error : Missing parameters", {
+        name: name,
+        user_id: user_id,
+        voice_id: voice_id,
+        system_prompt: system_prompt
       });
       return c.json({
         status: 'error',
         message: 'Missing parameters',
         error: {
-          name : name,
-          user_id : user_id,
-          voice_id : voice_id,
-          system_prompt : system_prompt
+          name: name,
+          user_id: user_id,
+          voice_id: voice_id,
+          system_prompt: system_prompt
         }
       }, 500);
     }
@@ -58,30 +58,30 @@ export const createAgent = async (c: Context) => {
 
     // Store bot in DB with Ultravox Agent reference
     const { data: insertedBot, error } = await supabase
-        .from("bots")
-        .insert([{
-          name,
-          phone_number: "",
-          voice: voice_id,
-          is_deleted: false,
-          created_at: new Date(),
-          is_appointment_booking_allowed: false,
-          user_id: user_id,
-          system_prompt: system_prompt,
-          model,
-          temperature,
-          first_speaker,
-          selected_tools,
-          is_agent: true, // New field
-          ultravox_agent_id: ultravoxAgent.agentId, // New field
-          ultravox_published_revision_id: ultravoxAgent.publishedRevisionId, // New field
-          last_synced_at: new Date().toISOString(), // New field
-        }])
-        .select()
-        .single();
+      .from("bots")
+      .insert([{
+        name,
+        phone_number: "",
+        voice: voice_id,
+        is_deleted: false,
+        created_at: new Date(),
+        is_appointment_booking_allowed: false,
+        user_id: user_id,
+        system_prompt: system_prompt,
+        model,
+        temperature,
+        first_speaker,
+        selected_tools,
+        is_agent: true, // New field
+        ultravox_agent_id: ultravoxAgent.agentId, // New field
+        ultravox_published_revision_id: ultravoxAgent.publishedRevisionId, // New field
+        last_synced_at: new Date().toISOString(), // New field
+      }])
+      .select()
+      .single();
 
-    if (error){
-      console.error("Recevied /agent/create Error",error);
+    if (error) {
+      console.error("Recevied /agent/create Error", error);
 
       // Rollback: Delete Ultravox Agent if DB insert fails
       console.log("[AgentController] Rolling back Ultravox Agent:", ultravoxAgent.agentId);
@@ -94,70 +94,70 @@ export const createAgent = async (c: Context) => {
       return c.json({
         status: 'error',
         message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
+        error: error,
+      }, 500);
     }
     return c.json({
       status: 'success',
-      data: insertedBot ,
+      data: insertedBot,
     })
-  }catch(error){
-    console.error("Recevied /agent/create Error",error);
+  } catch (error) {
+    console.error("Recevied /agent/create Error", error);
     return c.json({
       status: 'error',
       message: 'Internal Server Error',
-      error:  error instanceof Error ? error.message : error ,
-    } , 500);
+      error: error instanceof Error ? error.message : error,
+    }, 500);
   }
 }
 
 export const updateAgent = async (c: Context) => {
-  try{
+  try {
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
     const body = await c.req.json()
     const { id, name, twilio_from_number, voice_id, system_prompt } = body
 
     const { data: insertedBot, error } = await supabase
-        .from("bots")
-        .update({
-          name,
-          phone_number: twilio_from_number,
-          voice :voice_id,
-          system_prompt: system_prompt,
-        })
-        .eq('id', id)
-        .select()
-        .single();
+      .from("bots")
+      .update({
+        name,
+        phone_number: twilio_from_number,
+        voice: voice_id,
+        system_prompt: system_prompt,
+      })
+      .eq('id', id)
+      .select()
+      .single();
 
-    if (error){
-      console.error("Recevied /agent/update Error",error);
+    if (error) {
+      console.error("Recevied /agent/update Error", error);
       return c.json({
         status: 'error',
         message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
+        error: error,
+      }, 500);
     }
     return c.json({
       status: 'success',
-      data: insertedBot ,
+      data: insertedBot,
     })
-  }catch(error){
-    console.error("Recevied /agent/update Error",error);
+  } catch (error) {
+    console.error("Recevied /agent/update Error", error);
     return c.json({
       status: 'error',
       message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
+      error: error,
+    }, 500);
   }
 }
 
 export const deleteAgent = async (c: Context) => {
-  try{
+  try {
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
 
-    const id  = c.req.query('id')
+    const id = c.req.query('id')
 
     if (!id) {
       console.error("Recevied /agent/delete Error : Missing parameters");
@@ -166,33 +166,33 @@ export const deleteAgent = async (c: Context) => {
         message: 'Missing parameters',
       }, 500);
     }
-    const {data: existingBot, error: supabaseError } = await supabase
-        .from("bots")
-        .select()
-        .eq('id', id)
-        .single();
+    const { data: existingBot, error: supabaseError } = await supabase
+      .from("bots")
+      .select()
+      .eq('id', id)
+      .single();
 
-    if (!existingBot){
+    if (!existingBot) {
       console.error("Recevied /agent/delete Error : Bot not found");
       return c.json({
         status: 'error',
         message: 'Bot with id ' + id + ' not found',
-      } , 500);
+      }, 500);
     }
-    if (existingBot?.is_deleted){
+    if (existingBot?.is_deleted) {
       console.error("Recevied /agent/delete Error : Bot already deleted");
       return c.json({
         status: 'error',
         message: 'Bot with id ' + id + ' already deleted',
-      } , 500);
+      }, 500);
     }
-    if (supabaseError){
+    if (supabaseError) {
       console.error("Recevied /agent/delete Error", supabaseError);
       return c.json({
         status: 'error',
         message: 'Internal Server Error',
-        error:  supabaseError ,
-      } , 500);
+        error: supabaseError,
+      }, 500);
     }
 
     // If this is an agent-based bot, delete from Ultravox first
@@ -211,33 +211,33 @@ export const deleteAgent = async (c: Context) => {
 
     // Soft delete in local DB
     const { data: deletedBot, error } = await supabase
-        .from("bots")
-        .update({
-          is_deleted: true,
-        })
-        .eq('id', id)
-        .select()
-        .single();
+      .from("bots")
+      .update({
+        is_deleted: true,
+      })
+      .eq('id', id)
+      .select()
+      .single();
 
-    if (error){
-      console.error("Recevied /agent/delete Error",error);
+    if (error) {
+      console.error("Recevied /agent/delete Error", error);
       return c.json({
         status: 'error',
         message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
+        error: error,
+      }, 500);
     }
     return c.json({
       status: 'success',
-      data: deletedBot ,
+      data: deletedBot,
     })
-  }catch(error){
-    console.error("Recevied /agent/delete Error",error);
+  } catch (error) {
+    console.error("Recevied /agent/delete Error", error);
     return c.json({
       status: 'error',
       message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
+      error: error,
+    }, 500);
   }
 }
 
@@ -245,7 +245,7 @@ export const getAgent = async (c: Context) => {
   try {
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
-    const id  = c.req.param('id')
+    const id = c.req.param('id')
     if (!id) {
       console.error("Recevied /agent/get Error : Missing parameters");
       return c.json({
@@ -289,7 +289,7 @@ export const getAgent = async (c: Context) => {
 }
 
 export const getAllAgents = async (c: Context) => {
-  try{
+  try {
     const env = getEnv(c.env)
     const supabase = getSupabaseClient(env);
 
@@ -304,32 +304,32 @@ export const getAllAgents = async (c: Context) => {
     }
 
     const { data: insertedBot, error } = await supabase
-        .from("bots")
-        .select()
-        .eq('user_id', user_id);
+      .from("bots")
+      .select()
+      .eq('user_id', user_id);
 
 
     const filteredBots = insertedBot?.filter((bot) => !bot.is_deleted);
 
-    if (error){
-      console.error("Recevied /agent/getAllAgents Error",error);
+    if (error) {
+      console.error("Recevied /agent/getAllAgents Error", error);
       return c.json({
         status: 'error',
         message: 'Internal Server Error',
-        error:  error ,
-      } , 500);
+        error: error,
+      }, 500);
     }
     return c.json({
       status: 'success',
-      data: filteredBots ,
+      data: filteredBots,
     })
-  }catch(error){
-    console.error("Recevied /agent/get Error",error);
+  } catch (error) {
+    console.error("Recevied /agent/get Error", error);
     return c.json({
       status: 'error',
       message: 'Internal Server Error',
-      error:  error ,
-    } , 500);
+      error: error,
+    }, 500);
   }
 }
 
@@ -391,7 +391,7 @@ export const syncAgent = async (c: Context) => {
             temperature: bot.temperature > 0 ? Number(`0.${bot.temperature}`) : 0,
             firstSpeaker: bot.first_speaker || "FIRST_SPEAKER_USER",
             recordingEnabled: true,
-            selectedTools: [],
+            selectedTools: bot.selected_tools?.map((toolName: string) => ({ toolName })) || [],
             medium: { twilio: {} },
           },
         }
