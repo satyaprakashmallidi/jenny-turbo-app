@@ -38,7 +38,7 @@ const app = createApp();
 
 app.post('/api/set-twilio-webhook', async (c) => {
   const body = await c.req.json();
-  const { voice_url , account_sid , auth_token , phone_number_sid: phone_number } = body;
+  const { voice_url, account_sid, auth_token, phone_number_sid: phone_number } = body;
 
   console.log("Set Twilio Webhook Body", body);
 
@@ -51,13 +51,13 @@ app.post('/api/set-twilio-webhook', async (c) => {
 
   //get the phone number sid
   const sid_response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${account_sid}/IncomingPhoneNumbers.json?PhoneNumber=${phone_number}`
-, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Basic ${Buffer.from(`${account_sid}:${auth_token}`).toString('base64')}`,
-    },
-  });
+    , {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${Buffer.from(`${account_sid}:${auth_token}`).toString('base64')}`,
+      },
+    });
 
   const sid_data = await sid_response.json() as { incoming_phone_numbers: { sid: string }[] };
 
@@ -66,17 +66,17 @@ app.post('/api/set-twilio-webhook', async (c) => {
   console.log("Phone Number SID", phone_number_sid);
 
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${account_sid}/IncomingPhoneNumbers/${phone_number_sid}.json`
-, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Authorization': `Basic ${Buffer.from(`${account_sid}:${auth_token}`).toString('base64')}`,
-    },
-    body: new URLSearchParams({
-      VoiceUrl: voice_url,
-      VoiceMethod: 'GET',
-    }).toString(),
-  });
+    , {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${Buffer.from(`${account_sid}:${auth_token}`).toString('base64')}`,
+      },
+      body: new URLSearchParams({
+        VoiceUrl: voice_url,
+        VoiceMethod: 'GET',
+      }).toString(),
+    });
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -106,7 +106,7 @@ app.get('/api/inbound', async (c) => {
   const callerState = c.req.query('CallerState') || c.req.query('FromState');
   const callerCity = c.req.query('CallerCity') || c.req.query('FromCity');
   const callerZip = c.req.query('CallerZip') || c.req.query('FromZip');
-  
+
   // Extract called number information
   const calledNumber = c.req.query('Called') || c.req.query('To');
   const calledCountry = c.req.query('CalledCountry') || c.req.query('ToCountry');
@@ -121,9 +121,9 @@ app.get('/api/inbound', async (c) => {
   const unauthorizedResponse = ` <Response>
       <Say voice="alice">Kindly Contact Support , The Service is currently Blocked</Say>
     </Response>`
-  
+
   if (!userId || !botId) {
-    return c.text(unauthorizedResponse, 200 , {
+    return c.text(unauthorizedResponse, 200, {
       'Content-Type': 'text/xml'
     });
   }
@@ -136,19 +136,19 @@ app.get('/api/inbound', async (c) => {
     .eq('id', botId);
 
   if (error) {
-    return c.text(errorResponse, 200 , {
+    return c.text(errorResponse, 200, {
       'Content-Type': 'text/xml'
     });
   }
 
   if (!data || data.length === 0) {
-    return c.text(errorResponse, 200 , {
+    return c.text(errorResponse, 200, {
       'Content-Type': 'text/xml'
     });
   }
 
-  if(data[0].user_id !== userId) {
-    return c.text(unauthorizedResponse, 200 , {
+  if (data[0].user_id !== userId) {
+    return c.text(unauthorizedResponse, 200, {
       'Content-Type': 'text/xml'
     });
   }
@@ -158,7 +158,7 @@ app.get('/api/inbound', async (c) => {
   const bot = data[0];
 
   console.log("Bot Data", bot);
-  const { voice , system_prompt , name , temperature , is_appointment_booking_allowed ,twilio_phone_number , appointment_tool_id , knowledge_base_id , is_call_transfer_allowed , call_transfer_number , is_agent , ultravox_agent_id } = bot;
+  const { voice, system_prompt, name, temperature, is_appointment_booking_allowed, twilio_phone_number, appointment_tool_id, knowledge_base_id, is_call_transfer_allowed, call_transfer_number, is_agent, ultravox_agent_id } = bot;
 
   let tools = [{
     toolName: "hangUp"
@@ -166,7 +166,7 @@ app.get('/api/inbound', async (c) => {
     toolName: "leaveVoicemail",
   }];
 
-  if(knowledge_base_id){
+  if (knowledge_base_id) {
     tools.push({
       toolName: "queryCorpus",
       //@ts-ignore
@@ -180,25 +180,25 @@ app.get('/api/inbound', async (c) => {
   // Add realtime data capture tool if enabled and configured
   const isRealtimeCaptureEnabled = bot?.is_realtime_capture_enabled || false;
   const realtimeCaptureFields = bot?.realtime_capture_fields || [];
-  
+
   if (isRealtimeCaptureEnabled && realtimeCaptureFields.length > 0) {
     const dynamicParameters = realtimeCaptureFields.map((field: any) => {
       const parameter = {
         name: field.name,
         location: "PARAMETER_LOCATION_BODY" as const,
         schema: {
-          type: field.type === "text" ? "string" : 
-                field.type === "number" ? "number" : 
-                field.type === "boolean" ? "boolean" : 
+          type: field.type === "text" ? "string" :
+            field.type === "number" ? "number" :
+              field.type === "boolean" ? "boolean" :
                 "string",
           description: field.description,
-          ...(field.type === "enum" && field.enum_values && field.enum_values.length > 0 
-            ? { enum: field.enum_values } 
+          ...(field.type === "enum" && field.enum_values && field.enum_values.length > 0
+            ? { enum: field.enum_values }
             : {})
         },
         required: field.required || false
       };
-      
+
       return parameter;
     });
 
@@ -220,7 +220,7 @@ app.get('/api/inbound', async (c) => {
 
   const callConfig: CallConfig = {
     voice,
-    temperature: temperature>0 ? Number(`0.${temperature}`) : 0,
+    temperature: temperature > 0 ? Number(`0.${temperature}`) : 0,
     joinTimeout: "30s",
     maxDuration: "300s",
     recordingEnabled: true,
@@ -294,7 +294,7 @@ app.get('/api/inbound', async (c) => {
       tools,
       supabase: c.req.db,
       env: c.req.env,
-      temperature: temperature>0 ? Number(`0.${temperature}`) : 0,
+      temperature: temperature > 0 ? Number(`0.${temperature}`) : 0,
       callSid: callSid as string,
       twilioFromNumber: twilio_phone_number,
       transferTo: is_call_transfer_allowed ? call_transfer_number : undefined,
@@ -342,28 +342,28 @@ app.get('/api/inbound', async (c) => {
       </Connect>
     </Response>`;
 
-  return c.text(finalResp, 200 , {
+  return c.text(finalResp, 200, {
     'Content-Type': 'text/xml'
   });
-  
+
 })
 
 app.post('/api/async-amd-status', async (c) => {
-    const body = await c.req.parseBody();
-    const AccountSid = body.AccountSid;
-    const answeredBy = body.AnsweredBy;
-    const CallSid = body.CallSid;
+  const body = await c.req.parseBody();
+  const AccountSid = body.AccountSid;
+  const answeredBy = body.AnsweredBy;
+  const CallSid = body.CallSid;
 
-    console.log("Async AMD Status" , AccountSid , answeredBy , CallSid );
+  console.log("Async AMD Status", AccountSid, answeredBy, CallSid);
 
-    if(answeredBy === 'machine_start' || answeredBy === 'machine_end_beep' || answeredBy === 'machine_end_silence' || answeredBy === 'machine_end_other'){
-      await TwilioService.getInstance().voiceMailDetector(CallSid as string, AccountSid as string);
-    }
-    
-    return c.json({
-      status: 'success',
-      message: 'Async AMD Status received',
-    });
+  if (answeredBy === 'machine_start' || answeredBy === 'machine_end_beep' || answeredBy === 'machine_end_silence' || answeredBy === 'machine_end_other') {
+    await TwilioService.getInstance().voiceMailDetector(CallSid as string, AccountSid as string);
+  }
+
+  return c.json({
+    status: 'success',
+    message: 'Async AMD Status received',
+  });
 })
 
 app.post('/api/test', async (c) => {
@@ -378,17 +378,17 @@ app.post('/api/test', async (c) => {
   }
 
   const { data, error } = await c.req.db
-            .from('twilio_account')
-            .select('user_id , account_name')
-            .eq('account_sid', accountSid);
+    .from('twilio_account')
+    .select('user_id , account_name')
+    .eq('account_sid', accountSid);
 
-            console.log("Test API Response", data, error);
+  console.log("Test API Response", data, error);
 
-            return c.json({
-              status: 'success',
-              data,
-              error
-            });
+  return c.json({
+    status: 'success',
+    data,
+    error
+  });
 });
 
 
@@ -412,10 +412,10 @@ export interface CallTranscriptResponse {
 
 interface CallTranscriptMap {
   [callId: string]: {
-      messages: CallMessage[];
-      lastFetched: number;
-      hasMore: boolean;
-      nextCursor: string | null;
+    messages: CallMessage[];
+    lastFetched: number;
+    hasMore: boolean;
+    nextCursor: string | null;
   };
 }
 
@@ -433,97 +433,97 @@ app.get('/api/transcript', async (c) => {
 
   const transcriptMap: CallTranscriptMap = {};
 
-  try{
-    
+  try {
+
     console.log(`Fetching transcript for call: ${callId} ${cursor ? `with cursor: ${cursor}` : ''}`);
 
     // First, try to get transcripts from the database
     let query = c.req.db
-        .from('call_transcripts')
-        .select('*')
-        .eq('call_id', callId)
-        .order('chunk_index', { ascending: true });
+      .from('call_transcripts')
+      .select('*')
+      .eq('call_id', callId)
+      .order('chunk_index', { ascending: true });
 
     // Apply pagination if cursor is provided
     if (cursor) {
-        const parsedCursor = parseInt(cursor, 10);
-        if (!isNaN(parsedCursor)) {
-            query = query.gt('chunk_index', parsedCursor).limit(20);
-        }
+      const parsedCursor = parseInt(cursor, 10);
+      if (!isNaN(parsedCursor)) {
+        query = query.gt('chunk_index', parsedCursor).limit(20);
+      }
     } else {
-        query = query.limit(20);
+      query = query.limit(20);
     }
 
     const { data, error } = await query;
 
     // If we have data from the database, process and return it
     if (data && data.length > 0 && !error) {
-        // Process and format the transcript chunks into CallMessages
-        const messages: CallMessage[] = [];
-        
-        // Since transcript_chunk is stored as a JSON string containing an array of messages
-        data.forEach(chunk => {
-            try {
-                const chunkMessages = JSON.parse(chunk.transcript_chunk);
-                if (Array.isArray(chunkMessages)) {
-                    messages.push(...chunkMessages);
-                }
-            } catch (e) {
-                console.error('Error parsing transcript chunk:', e);
-            }
-        });
+      // Process and format the transcript chunks into CallMessages
+      const messages: CallMessage[] = [];
 
-        // Determine if there's more data to fetch
-        const lastIndex = data[data.length - 1].chunk_index;
-        const nextCursor = lastIndex !== undefined ? String(lastIndex) : null;
+      // Since transcript_chunk is stored as a JSON string containing an array of messages
+      data.forEach(chunk => {
+        try {
+          const chunkMessages = JSON.parse(chunk.transcript_chunk);
+          if (Array.isArray(chunkMessages)) {
+            messages.push(...chunkMessages);
+          }
+        } catch (e) {
+          console.error('Error parsing transcript chunk:', e);
+        }
+      });
 
-        // Check if there are more records
-        const { count } = await c.req.db
-            .from('call_transcripts')
-            .select('*', { count: 'exact', head: true })
-            .eq('call_id', callId)
-            .gt('chunk_index', lastIndex);
+      // Determine if there's more data to fetch
+      const lastIndex = data[data.length - 1].chunk_index;
+      const nextCursor = lastIndex !== undefined ? String(lastIndex) : null;
 
-        const hasMore = !!count && count > 0;
+      // Check if there are more records
+      const { count } = await c.req.db
+        .from('call_transcripts')
+        .select('*', { count: 'exact', head: true })
+        .eq('call_id', callId)
+        .gt('chunk_index', lastIndex);
 
-        // Update store based on whether this is initial load or pagination
-        transcriptMap[callId] = {
-            messages,
-            lastFetched: lastIndex,
-            hasMore,
-            nextCursor: hasMore ? nextCursor : null
-            };
-  
+      const hasMore = !!count && count > 0;
 
-        console.log(`Retrieved transcript from database for call: ${callId}`);
-        return c.json({
-            messages,
-            hasMore,
-            nextCursor: hasMore ? nextCursor : null
-        });
+      // Update store based on whether this is initial load or pagination
+      transcriptMap[callId] = {
+        messages,
+        lastFetched: lastIndex,
+        hasMore,
+        nextCursor: hasMore ? nextCursor : null
+      };
+
+
+      console.log(`Retrieved transcript from database for call: ${callId}`);
+      return c.json({
+        messages,
+        hasMore,
+        nextCursor: hasMore ? nextCursor : null
+      });
     }
 
     // If no data in database or there was an error, call the API
     console.log(`No transcript found in database for call: ${callId}, calling API...`);
-    
-    
+
+
     // Call the API to get the transcript
     const callTranscriptsService = CallTranscriptsService.getInstance(c.req.env, c.req.db);
-    
-      const response = await callTranscriptsService.getCallTranscript(callId, 100);
-    
-   
+
+    const response = await callTranscriptsService.getCallTranscript(callId, 100);
+
+
     const transcriptData = response;
-    
+
     return c.json({
-        messages: transcriptData.results,
-        hasMore: transcriptData.next,
-        nextCursor: transcriptData.next
+      messages: transcriptData.results,
+      hasMore: transcriptData.next,
+      nextCursor: transcriptData.next
     });
-      
-      
+
+
   }
-  catch(error){
+  catch (error) {
     console.error("Get Call transcripts Error:", error);
     return c.json({
       status: 'error',
@@ -551,33 +551,33 @@ app.post('/api/joined-call', joinedCall);
 app.get('/api/debug-campaign/:campaign_id', async (c) => {
   try {
     const campaign_id = c.req.param('campaign_id');
-    
+
     if (!campaign_id) {
       return c.json({ status: 'error', message: 'Missing campaign_id' }, 400);
     }
-    
+
     // Get campaign details
     const { data: campaignData, error: campaignError } = await c.req.db
       .from('call_campaigns')
       .select('*')
       .eq('campaign_id', campaign_id)
       .single();
-    
+
     if (campaignError || !campaignData) {
       return c.json({ status: 'error', message: 'Campaign not found', error: campaignError?.message }, 404);
     }
-    
+
     // Get all contacts with their status
     const { data: contactsData, error: contactsError } = await c.req.db
       .from('call_campaign_contacts')
       .select('contact_id, contact_phone, contact_name, call_status, call_duration, ultravox_call_id, completed_at, error_message')
       .eq('campaign_id', campaign_id)
       .order('created_at', { ascending: true });
-    
+
     if (contactsError) {
       return c.json({ status: 'error', message: 'Failed to fetch contacts', error: contactsError.message }, 500);
     }
-    
+
     // Count statuses
     const statusCounts = {
       pending: 0,
@@ -587,19 +587,19 @@ app.get('/api/debug-campaign/:campaign_id', async (c) => {
       failed: 0,
       cancelled: 0
     };
-    
+
     contactsData?.forEach((contact: any) => {
       const status = contact.call_status;
       if (status in statusCounts) {
         statusCounts[status as keyof typeof statusCounts]++;
       }
     });
-    
+
     // Check if database trigger should have fired
     const totalContacts = contactsData?.length || 0;
     const pendingContacts = statusCounts.pending + statusCounts.queued + statusCounts.in_progress;
     const shouldBeCompleted = pendingContacts === 0 && totalContacts > 0;
-    
+
     return c.json({
       status: 'success',
       campaign: {
@@ -621,7 +621,7 @@ app.get('/api/debug-campaign/:campaign_id', async (c) => {
         timestamp: new Date().toISOString()
       }
     });
-    
+
   } catch (error) {
     console.error('Debug Campaign Error:', error);
     return c.json({ status: 'error', message: 'Internal server error', error: error instanceof Error ? error.message : String(error) }, 500);
@@ -632,24 +632,24 @@ app.get('/api/debug-campaign/:campaign_id', async (c) => {
 app.post('/api/force-update-campaign/:campaign_id', async (c) => {
   try {
     const campaign_id = c.req.param('campaign_id');
-    
+
     if (!campaign_id) {
       return c.json({ status: 'error', message: 'Missing campaign_id' }, 400);
     }
-    
+
     const { CampaignsService } = await import('./services/campaigns.service');
     const campaignsService = CampaignsService.getInstance();
     campaignsService.setDependencies(c.req.db, c.req.env);
-    
+
     const result = await campaignsService.checkAndUpdateCampaignStatus(campaign_id);
-    
+
     return c.json({
       status: 'success',
       message: 'Campaign status check forced',
       result: result,
       timestamp: new Date().toISOString()
     });
-    
+
   } catch (error) {
     console.error('Force Update Campaign Error:', error);
     return c.json({ status: 'error', message: 'Internal server error', error: error instanceof Error ? error.message : String(error) }, 500);
@@ -663,13 +663,13 @@ app.get('/api/check-lock', async (c) => {
     if (!number) {
       return c.json({ status: 'error', message: 'Missing number parameter' }, 400);
     }
-    
+
     // Normalize number for locking key
     const normalizedNumber = number.replaceAll("+", "").replaceAll(" ", "").replaceAll("-", "");
     const lockKey = `locked_twilio:${normalizedNumber}`;
-    
+
     const lockValue = await c.req.env.ACTIVE_CALLS.get(lockKey);
-    
+
     return c.json({
       status: 'success',
       number: number,
@@ -689,23 +689,23 @@ app.post('/api/remove-lock', async (c) => {
   try {
     const body = await c.req.json();
     const { number } = body;
-    
+
     if (!number) {
       return c.json({ status: 'error', message: 'Missing number parameter' }, 400);
     }
-    
+
     // Normalize number for locking key
     const normalizedNumber = number.replaceAll("+", "").replaceAll(" ", "").replaceAll("-", "");
     const lockKey = `locked_twilio:${normalizedNumber}`;
-    
+
     // Check if lock exists before removing
     const lockValue = await c.req.env.ACTIVE_CALLS.get(lockKey);
-    
+
     if (lockValue) {
       await c.req.env.ACTIVE_CALLS.delete(lockKey);
       console.log(`🔓 Manually removed lock for number: ${normalizedNumber}`);
     }
-    
+
     return c.json({
       status: 'success',
       message: lockValue ? 'Lock removed successfully' : 'No lock found',
@@ -740,10 +740,10 @@ app.get('/api/list-locks', async (c) => {
   }
 });
 
-app.get('/api/get-call-details' , async (c) => {
+app.get('/api/get-call-details', async (c) => {
   try {
     const callId = c.req.query('call_id');
-    
+
     if (!callId) {
       return c.json({
         status: 'error',
@@ -760,7 +760,7 @@ app.get('/api/get-call-details' , async (c) => {
       console.error("Get Call Details Error:", error);
     }
 
-    if ((!data || data.length === 0)  || (data[0].endReason !== 'unjoined' && (!data[0].short_summary  || !data[0].long_summary))) {
+    if ((!data || data.length === 0) || (data[0].endReason !== 'unjoined' && (!data[0].short_summary || !data[0].long_summary))) {
       try {
         const response = await fetch(`https://api.ultravox.ai/api/calls/${callId}`, {
           method: 'GET',
@@ -778,8 +778,8 @@ app.get('/api/get-call-details' , async (c) => {
         }
 
         const ultravoxResp = await response.json() as CallConfigWebhookResponse;
-        
-        const convert_to_details : CallDetails =  {
+
+        const convert_to_details: CallDetails = {
           call_id: callId,
           created: ultravoxResp.created,
           joined: ultravoxResp.joined,
@@ -861,7 +861,7 @@ app.get('/api/mind-dost', async (c) => {
         metadata: {
           "user_id": "c99f0ac3-a143-4be9-ad80-3f59cd04d712"
         },
-        selectedTools: [{"toolName":"hangUp"}]
+        selectedTools: [{ "toolName": "hangUp" }]
       }),
     });
 
@@ -894,10 +894,10 @@ app.post('/api/capture-outcome', async (c) => {
   try {
     const body = await c.req.json();
     console.log("Capturing Outcome", body);
-    
+
     // Extract call ID from request headers or body
     let callId = c.req.header('X-Call-ID') || body.callId;
-    
+
     if (!callId) {
       console.error("No call ID provided for capture outcome");
       return c.json({
@@ -905,18 +905,18 @@ app.post('/api/capture-outcome', async (c) => {
         message: 'Call ID is required',
       }, 400);
     }
-    
+
     // Save captured data to call_records
     try {
       // Remove callId from body to avoid duplication
       const { callId: _, ...capturedData } = body;
-      
+
       const { data: existingRecord, error: fetchError } = await c.req.db
         .from('call_records')
         .select('additional_data')
         .eq('call_id', callId)
         .single();
-        
+
       if (fetchError) {
         console.error("Error fetching existing call record:", fetchError);
         return c.json({
@@ -924,7 +924,7 @@ app.post('/api/capture-outcome', async (c) => {
           message: 'Failed to find call record',
         }, 500);
       }
-      
+
       // Merge existing additional_data with captured data
       const updatedAdditionalData = {
         ...existingRecord.additional_data,
@@ -934,14 +934,14 @@ app.post('/api/capture-outcome', async (c) => {
         },
         capture_timestamp: new Date().toISOString()
       };
-      
+
       const { error: updateError } = await c.req.db
         .from('call_records')
-        .update({ 
+        .update({
           additional_data: updatedAdditionalData,
         })
         .eq('call_id', callId);
-        
+
       if (updateError) {
         console.error("Error updating call record with captured data:", updateError);
         return c.json({
@@ -949,18 +949,18 @@ app.post('/api/capture-outcome', async (c) => {
           message: 'Failed to save captured data',
         }, 500);
       }
-      
+
       console.log("Successfully saved captured data to call_records for call:", callId);
       console.log("Captured data:", capturedData);
-      
+
     } catch (dbError) {
       console.error("Database error while saving captured data:", dbError);
       return c.json({
-        status: 'error', 
+        status: 'error',
         message: 'Database error occurred',
       }, 500);
     }
-    
+
     return c.json({
       status: 'success',
       message: 'Outcome captured and saved successfully',
@@ -1012,18 +1012,29 @@ app.post('/api/ultravox/createcall', async (c) => {
         agentCallRequest.firstSpeakerSettings = body.firstSpeakerSettings;
       }
 
-      // Create call using agent API
-      const agentCallResponse = await agentService.createCallWithAgent(
-        body.agentId,
-        agentCallRequest
-      );
+      console.log("[CreateCall] Agent Call Request:", JSON.stringify(agentCallRequest));
 
-      console.log("[CreateCall] Agent call created successfully:", agentCallResponse.callId);
+      try {
+        // Create call using agent API
+        const agentCallResponse = await agentService.createCallWithAgent(
+          body.agentId,
+          agentCallRequest
+        );
 
-      return c.json({
-        status: 'success',
-        data: agentCallResponse
-      });
+        console.log("[CreateCall] Agent call created successfully:", agentCallResponse.callId);
+
+        return c.json({
+          status: 'success',
+          data: agentCallResponse
+        });
+      } catch (agentError: any) {
+        console.error("[CreateCall] Agent Service Error:", agentError);
+        return c.json({
+          status: 'error',
+          message: agentError.message || 'Agent Service Error',
+          error: agentError
+        }, 500);
+      }
     }
 
     // Use direct call API (backward compatibility for non-agent bots)
@@ -1033,7 +1044,7 @@ app.post('/api/ultravox/createcall', async (c) => {
     //   body.firstSpeaker = "FIRST_SPEAKER_USER";
     // }
 
-    if(!body?.experimentalSettings){
+    if (!body?.experimentalSettings) {
       body.experimentalSettings = {
         backSeatDriver: true,
         model: "o4-mini",
@@ -1041,6 +1052,7 @@ app.post('/api/ultravox/createcall', async (c) => {
       }
     }
 
+    // Initialize selectedTools for direct API calls (not needed for agent calls)
     body.selectedTools = body.selectedTools || [];
 
     // Add realtime capture tool if bot has it enabled
@@ -1061,12 +1073,12 @@ app.post('/api/ultravox/createcall', async (c) => {
           schema: field.type === 'text'
             ? { type: "string", description: field.description }
             : field.type === 'number'
-            ? { type: "number", description: field.description }
-            : field.type === 'boolean'
-            ? { type: "boolean", description: field.description }
-            : field.type === 'enum'
-            ? { type: "string", enum: field.enum_values, description: field.description }
-            : { type: "string", description: field.description },
+              ? { type: "number", description: field.description }
+              : field.type === 'boolean'
+                ? { type: "boolean", description: field.description }
+                : field.type === 'enum'
+                  ? { type: "string", enum: field.enum_values, description: field.description }
+                  : { type: "string", description: field.description },
           required: field.required
         }));
 
@@ -1083,7 +1095,7 @@ app.post('/api/ultravox/createcall', async (c) => {
               }
             ],
             http: {
-              baseUrlPattern: "https://2d0b9fe78cf6.ngrok-free.app/api/capture-outcome",
+              baseUrlPattern: "https://d12ae112dc27.ngrok-free.app/api/capture-outcome",
               httpMethod: "POST"
             }
           }
@@ -1143,10 +1155,10 @@ app.get('/api/voices', async (c) => {
     const fetchAllVoices = async () => {
       let allVoices: any[] = [];
       let nextUrl = 'https://api.ultravox.ai/api/voices';
-      
+
       while (nextUrl) {
         console.log(`Fetching voices from: ${nextUrl}`);
-        
+
         const response = await fetch(nextUrl, {
           method: 'GET',
           headers: {
@@ -1162,7 +1174,7 @@ app.get('/api/voices', async (c) => {
         }
 
         const data = await response.json() as any;
-        
+
         // Add voices from current page
         if (data?.results && Array.isArray(data.results)) {
           const pageVoices = data.results.map((voice: any) => ({
@@ -1173,17 +1185,17 @@ app.get('/api/voices', async (c) => {
           allVoices.push(...pageVoices);
           console.log(`Fetched ${pageVoices.length} voices from current page. Total so far: ${allVoices.length}`);
         }
-        
+
         // Check if there's a next page
         nextUrl = data?.next || null;
-        
+
         if (nextUrl) {
           console.log(`Next page available: ${nextUrl}`);
         } else {
           console.log("No more pages to fetch");
         }
       }
-      
+
       return allVoices;
     };
 
@@ -1212,7 +1224,7 @@ app.post('/api/sendSummary', async (c) => {
   try {
     const body = await c.req.json();
     const callId = c.req.query('call_id');
-    
+
     if (!callId) {
       return c.json({
         status: 'error',
@@ -1222,9 +1234,9 @@ app.post('/api/sendSummary', async (c) => {
 
     const { error } = await c.req.db
       .from('summarys')
-      .upsert([{ 
-        call_id: callId, 
-        summary: body?.conversationSummary 
+      .upsert([{
+        call_id: callId,
+        summary: body?.conversationSummary
       }], {
         onConflict: 'call_id'
       });
@@ -1256,7 +1268,7 @@ app.post('/api/unlock-twilio-number', async (c) => {
   try {
     const body = await c.req.json();
     const { twilio_number } = body;
-    
+
     if (!twilio_number) {
       return c.json({
         status: 'error',
@@ -1265,15 +1277,15 @@ app.post('/api/unlock-twilio-number', async (c) => {
     }
 
     const twilioLockKey = `locked_twilio:${twilio_number}`;
-    
+
     try {
       // Check if the number is currently locked
       const lockValue = await c.req.env.ACTIVE_CALLS.get(twilioLockKey);
-      
+
       if (lockValue) {
         await c.req.env.ACTIVE_CALLS.delete(twilioLockKey);
         console.log(`🔓 Manually unlocked Twilio number: ${twilio_number}`);
-        
+
         return c.json({
           status: 'success',
           message: `Successfully unlocked Twilio number: ${twilio_number}`,
@@ -1282,7 +1294,7 @@ app.post('/api/unlock-twilio-number', async (c) => {
         });
       } else {
         console.log(`ℹ️  Twilio number was not locked: ${twilio_number}`);
-        
+
         return c.json({
           status: 'success',
           message: `Twilio number was not locked: ${twilio_number}`,
@@ -1310,7 +1322,7 @@ app.post('/api/unlock-twilio-number', async (c) => {
 app.get('/api/twilio-lock-status/:number', async (c) => {
   try {
     const twilio_number = c.req.param('number');
-    
+
     if (!twilio_number) {
       return c.json({
         status: 'error',
@@ -1320,7 +1332,7 @@ app.get('/api/twilio-lock-status/:number', async (c) => {
 
     const twilioLockKey = `locked_twilio:${twilio_number}`;
     const lockValue = await c.req.env.ACTIVE_CALLS.get(twilioLockKey);
-    
+
     return c.json({
       status: 'success',
       twilio_number,
@@ -1342,7 +1354,7 @@ app.get('/api/twilio-lock-status/:number', async (c) => {
 app.delete('/api/twilio-lock/:number', async (c) => {
   try {
     const twilio_number = c.req.param('number');
-    
+
     if (!twilio_number) {
       return c.json({
         status: 'error',
@@ -1351,16 +1363,16 @@ app.delete('/api/twilio-lock/:number', async (c) => {
     }
 
     const twilioLockKey = `locked_twilio:${twilio_number}`;
-    
+
     try {
       // Get current lock value before deleting
       const lockValue = await c.req.env.ACTIVE_CALLS.get(twilioLockKey);
-      
+
       // Always try to delete (won't error if key doesn't exist)
       await c.req.env.ACTIVE_CALLS.delete(twilioLockKey);
-      
+
       console.log(`🔓 Deleted lock for Twilio number: ${twilio_number}`);
-      
+
       return c.json({
         status: 'success',
         message: `Lock removed for Twilio number: ${twilio_number}`,
@@ -1390,7 +1402,7 @@ app.post('/api/requeue-pending-jobs', async (c) => {
   try {
     const body = await c.req.json();
     const { campaign_id } = body;
-    
+
     if (!campaign_id) {
       return c.json({
         status: 'error',
@@ -1427,12 +1439,12 @@ app.post('/api/requeue-pending-jobs', async (c) => {
     for (const job of pendingJobs) {
       try {
         console.log(`🚀 Requeuing job: ${job.job_id} for contact: ${job.payload.contact_phone}`);
-        
+
         await c.req.env.calls_que.send({
           job_id: job.job_id,
           payload: job.payload
         });
-        
+
         requeuedCount++;
         console.log(`✅ Successfully requeued job: ${job.job_id}`);
       } catch (error) {
@@ -1460,7 +1472,7 @@ app.post('/api/requeue-pending-jobs', async (c) => {
 app.get('/api/check-twilio-lock', async (c) => {
   try {
     const twilio_number = c.req.query('twilio_number');
-    
+
     if (!twilio_number) {
       return c.json({
         status: 'error',
@@ -1470,7 +1482,7 @@ app.get('/api/check-twilio-lock', async (c) => {
 
     const twilioLockKey = `locked_twilio:${twilio_number}`;
     const isLocked = await c.req.env.ACTIVE_CALLS.get(twilioLockKey);
-    
+
     return c.json({
       status: 'success',
       twilio_number,
@@ -1492,7 +1504,7 @@ app.post('/api/clear-all-locks', async (c) => {
   try {
     const body = await c.req.json();
     const { twilio_numbers } = body;
-    
+
     if (!twilio_numbers || !Array.isArray(twilio_numbers)) {
       return c.json({
         status: 'error',
@@ -1521,7 +1533,7 @@ app.post('/api/clear-all-locks', async (c) => {
         });
       }
     }
-    
+
     return c.json({
       status: 'success',
       message: `Processed ${twilio_numbers.length} numbers`,
@@ -1540,7 +1552,7 @@ app.post('/api/clear-all-locks', async (c) => {
 app.get('/api/getSummary', async (c) => {
   try {
     const callId = c.req.query('call_id');
-    
+
     if (!callId) {
       return c.json({
         status: 'error',
@@ -1624,15 +1636,15 @@ app.post('/api/add-call-to-db', async (c) => {
         user_id,
         call_date,
         call_details: updatedCallDetails,
-      }], { 
-        onConflict: 'user_id, call_date' 
+      }], {
+        onConflict: 'user_id, call_date'
       });
 
     if (error) {
       return c.json({ error: error.message }, 400);
     }
 
-    return c.json({ 
+    return c.json({
       status: 'success',
       message: 'Call recorded successfully'
     });
@@ -1762,55 +1774,55 @@ export default {
     const { getSupabaseClient } = await import('./lib/supabase/client');
     const { getEnv } = await import('./config/env');
     const { CampaignsService } = await import('./services/campaigns.service');
-    
+
     try {
       console.log('Scheduled task running at:', new Date().toISOString());
-      
+
       // Initialize Supabase client
       const processedEnv = getEnv(env);
       const supabase = getSupabaseClient(processedEnv);
-      
+
       // Initialize campaigns service
       const campaignsService = CampaignsService.getInstance();
       campaignsService.setDependencies(supabase, processedEnv);
-      
+
       // Process scheduled campaigns
       const result = await campaignsService.processScheduledCampaigns();
-      
+
       console.log('Scheduled campaigns processed:', result);
-      
+
       if (result.errors.length > 0) {
         console.error('Errors processing scheduled campaigns:', result.errors);
       }
-      
+
     } catch (error) {
       console.error('Error in scheduled task:', error);
     }
   },
-  queue: async (batch: MessageBatch<any> , env : env ) => {
+  queue: async (batch: MessageBatch<any>, env: env) => {
     // Import here to avoid circular dependencies
     const { getSupabaseClient } = await import('./lib/supabase/client');
     const { getEnv } = await import('./config/env');
 
     console.log("queue batch recevied ", batch.messages);
-    
+
     for (const msg of batch.messages) {
       const { job_id, payload } = msg.body;
-      
+
       console.log(`Processing queue message for job_id: ${job_id}, contact: ${payload.contact_phone || payload.toNumber}`);
       console.log(`Campaign settings:`, payload.campaign_settings);
       console.log(`Twilio numbers available:`, payload.twilio_phone_numbers);
       console.log(`🔒 Number locking enabled:`, payload.campaign_settings?.enableNumberLocking || false);
       console.log(`📞 Campaign ID:`, payload.campaign_id);
       console.log(`👤 Contact ID:`, payload.contact_id);
-      
+
       // Properly initialize Supabase client for queue context
       const processedEnv = getEnv(env);
       const supabase = getSupabaseClient(processedEnv);
       try {
         // Insert or update job status to 'processing'
         await supabase.from('call_jobs').upsert({ job_id, status: 'processing', updated_at: new Date().toISOString() }, { onConflict: 'job_id' });
-        
+
         // Update campaign contact status if this is a campaign call
         if (payload.campaign_id && payload.contact_id) {
           await supabase
@@ -1823,7 +1835,7 @@ export default {
         }
 
         let callId = null;
-        
+
         // Get retry count from database (instead of payload since Cloudflare Queue doesn't support payload modification)
         let retryCount = 0;
         try {
@@ -1838,17 +1850,17 @@ export default {
           retryCount = 0;
         }
         const maxRetries = 100;
-        
+
         if (retryCount >= maxRetries) {
           console.log(`❌ Job ${job_id} exceeded max retries (${maxRetries}), marking as failed`);
-          
+
           // Mark as permanently failed
-          await supabase.from('call_jobs').upsert({ 
-            job_id, 
-            status: 'failed', 
-            error_message: `Exceeded maximum retry attempts (${maxRetries})`, 
-            updated_at: new Date().toISOString(), 
-            processed_at: new Date().toISOString() 
+          await supabase.from('call_jobs').upsert({
+            job_id,
+            status: 'failed',
+            error_message: `Exceeded maximum retry attempts (${maxRetries})`,
+            updated_at: new Date().toISOString(),
+            processed_at: new Date().toISOString()
           }, { onConflict: 'job_id' });
 
           // Update campaign contact status if this is a campaign call
@@ -1862,7 +1874,7 @@ export default {
               })
               .eq('contact_id', payload.contact_id);
           }
-          
+
           // Log to dead letter queue table for observability
           try {
             await supabase.from('call_failed_jobs').insert([{
@@ -1878,10 +1890,10 @@ export default {
           } catch (dlqError) {
             console.error('Failed to log to dead letter queue:', dlqError);
           }
-          
+
           return;
         }
-        
+
         try {
           // Check time window before making the call
           console.log(`🕐 Time window check for job ${job_id}:`, {
@@ -1890,33 +1902,33 @@ export default {
             timezone: payload.campaign_settings?.timezone || 'UTC',
             currentTime: new Date().toISOString()
           });
-          
+
           if (payload.campaign_settings?.timeWindow) {
             const { CampaignsService } = await import('./services/campaigns.service');
             const campaignsService = CampaignsService.getInstance();
             campaignsService.setDependencies(supabase, processedEnv);
-            
+
             // Use the campaign's timezone or default to UTC
             const timezone = payload.campaign_settings?.timezone || 'UTC';
             const isWithinWindow = campaignsService.isWithinTimeWindow(
-              payload.campaign_settings.timeWindow, 
+              payload.campaign_settings.timeWindow,
               timezone
             );
-            
+
             if (!isWithinWindow) {
               console.log(`⏰ Job ${job_id} is outside time window, requeueing for later`);
-              
+
               // Calculate delay until next allowed time (15 minutes minimum)
               const delayMinutes = 15;
-              
+
               // Reset job status back to pending for retry
-              await supabase.from('call_jobs').upsert({ 
-                job_id, 
-                status: 'pending', 
+              await supabase.from('call_jobs').upsert({
+                job_id,
+                status: 'pending',
                 error_message: `Outside time window - requeueing for ${delayMinutes} minutes - ${new Date().toISOString()}`,
-                updated_at: new Date().toISOString() 
+                updated_at: new Date().toISOString()
               }, { onConflict: 'job_id' });
-              
+
               // Reset campaign contact status if this is a campaign call
               if (payload.campaign_id && payload.contact_id) {
                 await supabase
@@ -1927,18 +1939,18 @@ export default {
                   })
                   .eq('contact_id', payload.contact_id);
               }
-              
+
               msg.retry({
                 delaySeconds: delayMinutes * 60 // Convert to seconds
               });
               return;
             }
           }
-          
+
           // Call TwilioService.makeCall (single attempt)
           const twilioService = TwilioService.getInstance();
           twilioService.setDependencies(supabase, processedEnv);
-          
+
           // Ensure metadata is properly set for campaign calls
           payload.callConfig.metadata = {
             ...(payload.callConfig.metadata || {}),
@@ -1957,27 +1969,27 @@ export default {
           console.log("🔒 Number locking enabled:", payload.campaign_settings?.enableNumberLocking || false);
           console.log("📞 Available Twilio numbers:", payload.twilio_phone_numbers?.length || 1);
           console.log("⏰ Time window check:", payload.campaign_settings?.timeWindow ? "Passed" : "Not configured");
-          
-          const result = await twilioService.makeCall({ 
-            ...payload, 
-            supabase, 
-            env, 
+
+          const result = await twilioService.makeCall({
+            ...payload,
+            supabase,
+            env,
             configureBots: true,
             enableNumberLocking: payload.campaign_settings?.enableNumberLocking || false,
             twilioFromNumbers: payload.twilio_phone_numbers // Pass array of numbers for round-robin
           });
-          
+
           // Extract callId from result (if present)
           callId = result?.callId || null;
-          
+
         } catch (error) {
           console.log("Queue Processing Error", error);
           const errorMessage = error instanceof Error ? error.message : String(error);
-          
+
           // Calculate exponential backoff delay: 15 * 2^retryCount, max 300 seconds
           const baseDelay = 15;
           const exponentialDelay = Math.min(300, baseDelay * Math.pow(2, retryCount));
-          
+
           // If Ultravox returns 429, use exponential backoff (max 5 retries, then move to KV buffer)
           if (errorMessage.toLowerCase().includes('concurency limit') || errorMessage.toLowerCase().includes('429')) {
             const max429Retries = 5;
@@ -2080,20 +2092,20 @@ export default {
               }
             }
           }
-          
+
           // If Twilio number is busy, use shorter exponential backoff
           if (errorMessage.includes('TWILIO_BUSY:')) {
             // Check if we've exceeded max retries for TWILIO_BUSY errors too
             if (retryCount >= maxRetries) {
               console.log(`❌ Job ${job_id} exceeded max retries (${maxRetries}) for TWILIO_BUSY, marking as failed`);
-              
+
               // Mark as permanently failed
-              await supabase.from('call_jobs').upsert({ 
-                job_id, 
-                status: 'failed', 
-                error_message: `All Twilio numbers busy - exceeded max retries (${maxRetries})`, 
-                updated_at: new Date().toISOString(), 
-                processed_at: new Date().toISOString() 
+              await supabase.from('call_jobs').upsert({
+                job_id,
+                status: 'failed',
+                error_message: `All Twilio numbers busy - exceeded max retries (${maxRetries})`,
+                updated_at: new Date().toISOString(),
+                processed_at: new Date().toISOString()
               }, { onConflict: 'job_id' });
 
               // Update campaign contact status if this is a campaign call
@@ -2107,7 +2119,7 @@ export default {
                   })
                   .eq('contact_id', payload.contact_id);
               }
-              
+
               // Log to dead letter queue table for observability
               try {
                 await supabase.from('call_failed_jobs').insert([{
@@ -2123,10 +2135,10 @@ export default {
               } catch (dlqError) {
                 console.error('Failed to log to dead letter queue:', dlqError);
               }
-              
+
               return;
             }
-            
+
             // Add minimum delay to prevent race conditions + exponential backoff
             const minDelayForRaceCondition = 3; // Minimum 3 seconds to prevent race conditions
             const twilioBaseDelay = 5; // 5 seconds base delay for Twilio retries
@@ -2135,15 +2147,15 @@ export default {
             console.log(`📞 Twilio numbers busy, retrying in ${twilioDelay}s (attempt ${retryCount + 1}/${maxRetries + 1}): ${errorMessage}`);
             console.log(`🔧 Retry calculation: baseDelay=${twilioBaseDelay}, retryCount=${retryCount}, exponentialBackoff=${exponentialBackoff}, finalDelay=${twilioDelay}`);
             console.log(`Job ID: ${job_id}, Contact: ${payload.contact_phone || payload.toNumber}`);
-            
+
             // Reset job status back to pending for retry
-            await supabase.from('call_jobs').upsert({ 
-              job_id, 
-              status: 'pending', 
+            await supabase.from('call_jobs').upsert({
+              job_id,
+              status: 'pending',
               error_message: `Waiting for available Twilio number - attempt ${retryCount + 1} - ${new Date().toISOString()}`,
-              updated_at: new Date().toISOString() 
+              updated_at: new Date().toISOString()
             }, { onConflict: 'job_id' });
-            
+
             // Reset campaign contact status if this is a campaign call
             if (payload.campaign_id && payload.contact_id) {
               await supabase
@@ -2154,29 +2166,29 @@ export default {
                 })
                 .eq('contact_id', payload.contact_id);
             }
-            
+
             // Store updated retry count in database
-            await supabase.from('call_jobs').upsert({ 
-              job_id, 
+            await supabase.from('call_jobs').upsert({
+              job_id,
               retry_count: retryCount + 1,
-              updated_at: new Date().toISOString() 
+              updated_at: new Date().toISOString()
             }, { onConflict: 'job_id' });
-            
+
             msg.retry({
               delaySeconds: twilioDelay
             });
             continue;
           }
-          
+
           // Other error, mark as failed immediately
           console.log(`❌ Permanent failure for job ${job_id}: ${errorMessage}`);
-          
-          await supabase.from('call_jobs').upsert({ 
-            job_id, 
-            status: 'failed', 
-            error_message: errorMessage, 
-            updated_at: new Date().toISOString(), 
-            processed_at: new Date().toISOString() 
+
+          await supabase.from('call_jobs').upsert({
+            job_id,
+            status: 'failed',
+            error_message: errorMessage,
+            updated_at: new Date().toISOString(),
+            processed_at: new Date().toISOString()
           }, { onConflict: 'job_id' });
 
           // Update campaign contact status if this is a campaign call
@@ -2190,7 +2202,7 @@ export default {
               })
               .eq('contact_id', payload.contact_id);
           }
-          
+
           // Log to dead letter queue table for observability
           try {
             await supabase.from('call_failed_jobs').insert([{
@@ -2206,7 +2218,7 @@ export default {
           } catch (dlqError) {
             console.error('Failed to log to dead letter queue:', dlqError);
           }
-          
+
           continue;
         }
         // Success: update job with callId and increment concurrency counter
@@ -2230,7 +2242,7 @@ export default {
           updated_at: new Date().toISOString(),
           processed_at: new Date().toISOString()
         }, { onConflict: 'job_id' });
-        
+
         if (jobUpdateError) {
           console.error(`❌ Failed to update job with ultravox_call_id:`, jobUpdateError);
         } else {
@@ -2244,7 +2256,7 @@ export default {
             contact_id: payload.contact_id,
             ultravox_call_id: callId
           });
-          
+
           const { error: contactUpdateError } = await supabase
             .from('call_campaign_contacts')
             .update({
@@ -2252,7 +2264,7 @@ export default {
               call_status: 'in_progress' // Will be updated to completed by webhook
             })
             .eq('contact_id', payload.contact_id);
-            
+
           if (contactUpdateError) {
             console.error(`❌ Failed to update campaign contact with ultravox_call_id:`, contactUpdateError);
           } else {
@@ -2261,12 +2273,12 @@ export default {
         }
 
       } catch (error) {
-        await supabase.from('call_jobs').upsert({ 
-          job_id, 
-          status: 'failed', 
-          error_message: error instanceof Error ? error.message : String(error), 
-          updated_at: new Date().toISOString(), 
-          processed_at: new Date().toISOString() 
+        await supabase.from('call_jobs').upsert({
+          job_id,
+          status: 'failed',
+          error_message: error instanceof Error ? error.message : String(error),
+          updated_at: new Date().toISOString(),
+          processed_at: new Date().toISOString()
         }, { onConflict: 'job_id' });
 
         // Update campaign contact status if this is a campaign call
