@@ -21,7 +21,13 @@ const app = new Hono<{ Bindings: Env }>();
 
 const ULTRAVOX_API_BASE = 'https://api.ultravox.ai/api';
 
+/**
+ * Event name emitted by Ultravox webhook callbacks.
+ */
 type WebhookEvent = string;
+/**
+ * Request payload for creating or updating an Ultravox webhook.
+ */
 type CreateWebhookBody = {
   url?: string;
   events?: WebhookEvent[];
@@ -31,6 +37,9 @@ type CreateWebhookBody = {
   agent_id?: string | null;
 };
 
+/**
+ * Ultravox API response schema for webhook endpoints.
+ */
 type UltravoxWebhookResponse = {
   webhookId: string;
   created: string;
@@ -43,6 +52,9 @@ type UltravoxWebhookResponse = {
   secrets: string[];
 };
 
+/**
+ * Standard API response envelope used by this service.
+ */
 type ApiResponse<T> = {
   status: 'success' | 'error';
   data?: T;
@@ -132,6 +144,9 @@ app.use('/*', injectDB)
 
 app.route('/api/twilio', twilioRoutes);
 
+/**
+ * Create a webhook in Ultravox and persist it in Supabase.
+ */
 app.post('/api/webhooks', async (c) => {
   try {
     const body = await c.req.json<CreateWebhookBody>();
@@ -225,6 +240,9 @@ app.post('/api/webhooks', async (c) => {
   }
 });
 
+/**
+ * List webhooks for a user, optionally filtered by agent_id.
+ */
 app.get('/api/webhooks/user', async (c) => {
   try {
     const userId = c.req.query('user_id');
@@ -287,6 +305,9 @@ app.get('/api/webhooks/user', async (c) => {
   }
 });
 
+/**
+ * Update an existing webhook in Ultravox and Supabase.
+ */
 app.patch('/api/webhooks/:webhookId', async (c) => {
   try {
     const webhookId = c.req.param('webhookId');
@@ -402,6 +423,9 @@ app.patch('/api/webhooks/:webhookId', async (c) => {
   }
 });
 
+/**
+ * Delete a webhook from Ultravox and Supabase.
+ */
 app.delete('/api/webhooks/:webhookId', async (c) => {
   try {
     const webhookId = c.req.param('webhookId');
@@ -474,6 +498,9 @@ app.delete('/api/webhooks/:webhookId', async (c) => {
   }
 });
 
+/**
+ * Sync missing webhook IDs for a single user's webhooks.
+ */
 app.post('/api/webhooks/sync', async (c) => {
   try {
     const userId = c.req.query('user_id');
@@ -571,6 +598,9 @@ app.post('/api/webhooks/sync', async (c) => {
   }
 });
 
+/**
+ * Sync missing webhook IDs for all users (protected by a shared token).
+ */
 app.post('/api/webhooks/sync-all', async (c) => {
   try {
     const token = c.req.query('token');
@@ -667,6 +697,9 @@ app.post('/api/webhooks/sync-all', async (c) => {
   }
 });
 
+/**
+ * Return webhooks that are missing Ultravox webhook IDs.
+ */
 app.get('/api/webhooks/missing', async (c) => {
   try {
     const userId = c.req.query('user_id');
@@ -707,6 +740,9 @@ app.get('/api/webhooks/missing', async (c) => {
   }
 });
 
+/**
+ * List webhooks directly from Ultravox for a user/agent filter.
+ */
 app.get('/api/webhooks/ultravox', async (c) => {
   try {
     const cursor = c.req.query('cursor');

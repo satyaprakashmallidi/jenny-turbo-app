@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+/**
+ * Zod schema for validating runtime environment variables.
+ */
 const envSchema = z.object({
     SUPABASE_URL: z.string(),
     SUPABASE_ANON_KEY: z.string(),
@@ -11,6 +14,9 @@ const envSchema = z.object({
     WEBHOOK_SYNC_SECRET: z.string(),
 });
 
+/**
+ * Strongly typed environment bindings for the Worker.
+ */
 export interface Env {
     SUPABASE_URL: string;
     SUPABASE_ANON_KEY: string;
@@ -22,6 +28,9 @@ export interface Env {
     WEBHOOK_SYNC_SECRET: string;
 }
 
+/**
+ * Validate and return sanitized environment variables.
+ */
 export function getEnv(env: Env) {
     const result = envSchema.safeParse(env);
     if (!result.success) {
