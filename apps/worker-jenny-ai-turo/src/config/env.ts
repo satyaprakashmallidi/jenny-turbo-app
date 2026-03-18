@@ -8,6 +8,7 @@ const envSchema = z.object({
     GOOGLE_CLIENT_ID: z.string(),
     GOOGLE_CLIENT_SECRET: z.string(),
     SUPABASE_SERVICE_ROLE_KEY: z.string(),
+    WEBHOOK_SYNC_SECRET: z.string(),
 });
 
 export interface Env {
@@ -18,6 +19,7 @@ export interface Env {
     GOOGLE_CLIENT_ID: string;
     GOOGLE_CLIENT_SECRET: string;
     SUPABASE_SERVICE_ROLE_KEY: string;
+    WEBHOOK_SYNC_SECRET: string;
 }
 
 export function getEnv(env: Env) {

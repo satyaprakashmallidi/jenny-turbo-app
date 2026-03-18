@@ -19,6 +19,37 @@ const cacheDuration = 60 * 60 * 1000;
 //creating a Hono JS Appplication with Envs
 const app = new Hono<{ Bindings: Env }>();
 
+const ULTRAVOX_API_BASE = 'https://api.ultravox.ai/api';
+
+type WebhookEvent = string;
+type CreateWebhookBody = {
+  url?: string;
+  events?: WebhookEvent[];
+  agentId?: string | null;
+  secrets?: string[];
+  user_id?: string;
+  agent_id?: string | null;
+};
+
+type UltravoxWebhookResponse = {
+  webhookId: string;
+  created: string;
+  url: string;
+  events: WebhookEvent[];
+  status: 'normal' | 'unhealthy';
+  lastStatusChange: string | null;
+  recentFailures: Array<{ timestamp: string; failure: string }>;
+  agentId: string | null;
+  secrets: string[];
+};
+
+type ApiResponse<T> = {
+  status: 'success' | 'error';
+  data?: T;
+  message?: string;
+  error?: unknown;
+};
+
 
 //Extend HonoRequest to Include SupaabaseClient
 declare module 'hono' {
@@ -100,6 +131,628 @@ app.use('/*', injectEnv)
 app.use('/*', injectDB)
 
 app.route('/api/twilio', twilioRoutes);
+
+app.post('/api/webhooks', async (c) => {
+  try {
+    const body = await c.req.json<CreateWebhookBody>();
+    const userId = body.user_id;
+    const url = body.url?.trim();
+    const events = body.events || [];
+    const rawAgentId = body.agentId ?? null;
+    const isUuid = (value: string | null) =>
+      !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    const dbAgentId = isUuid(body.agent_id ?? null)
+      ? body.agent_id!
+      : (isUuid(rawAgentId) ? rawAgentId : null);
+
+    if (!userId || !url || events.length === 0) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Missing required fields: user_id, url, events',
+      }, 400);
+    }
+
+    const ultraResponse = await fetch(`${ULTRAVOX_API_BASE}/webhooks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': c.env.ULTRAVOX_API_KEY,
+      },
+      body: JSON.stringify({
+        url,
+        events,
+        agentId: rawAgentId,
+        secrets: body.secrets,
+      }),
+    });
+
+    if (!ultraResponse.ok) {
+      const errorText = await ultraResponse.text();
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Ultravox API error',
+        error: errorText,
+      }, 500);
+    }
+
+    const ultraData = await ultraResponse.json() as UltravoxWebhookResponse;
+
+    const { data: dbRow, error } = await c.req.db
+      .from('ultravox_webhooks')
+      .upsert([{
+        user_id: userId,
+        ultravox_webhook_id: ultraData.webhookId,
+        url: ultraData.url,
+        events: ultraData.events,
+        agent_id: dbAgentId,
+        status: ultraData.status,
+        last_status_change: ultraData.lastStatusChange,
+        secret_key: ultraData.secrets?.[0] ?? null,
+        recent_failures: ultraData.recentFailures ?? [],
+      }], { onConflict: 'ultravox_webhook_id' })
+      .select('*')
+      .single();
+
+    if (error) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Failed to save webhook in database',
+        error,
+      }, 500);
+    }
+
+    return c.json<ApiResponse<any>>({
+      status: 'success',
+      data: {
+        webhook_id: dbRow.webhook_id,
+        created: ultraData.created || dbRow.created_at,
+        url: dbRow.url,
+        events: dbRow.events,
+        status: dbRow.status,
+        lastStatusChange: dbRow.last_status_change,
+        recentFailures: dbRow.recent_failures || [],
+        agentId: dbRow.agent_id,
+        secrets: ultraData.secrets || [],
+      },
+    });
+  } catch (error) {
+    console.error('Create Webhook Error:', error);
+    return c.json<ApiResponse<null>>({
+      status: 'error',
+      message: 'Internal Server Error',
+      error,
+    }, 500);
+  }
+});
+
+app.get('/api/webhooks/user', async (c) => {
+  try {
+    const userId = c.req.query('user_id');
+    const agentId = c.req.query('agent_id');
+
+    if (!userId) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Missing user_id',
+      }, 400);
+    }
+
+    let query = c.req.db
+      .from('ultravox_webhooks')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (agentId) {
+      query = query.eq('agent_id', agentId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Failed to fetch webhooks',
+        error,
+      }, 500);
+    }
+
+    const results = (data || []).map((row: any) => ({
+      webhook_id: row.webhook_id,
+      created: row.created_at,
+      url: row.url,
+      events: row.events,
+      status: row.status,
+      lastStatusChange: row.last_status_change,
+      recentFailures: row.recent_failures || [],
+      agentId: row.agent_id,
+      secrets: row.secret_key ? [row.secret_key] : [],
+    }));
+
+    return c.json<ApiResponse<{ next: null; previous: null; results: any[] }>>({
+      status: 'success',
+      data: {
+        next: null,
+        previous: null,
+        results,
+      },
+    });
+  } catch (error) {
+    console.error('List Webhooks Error:', error);
+    return c.json<ApiResponse<null>>({
+      status: 'error',
+      message: 'Internal Server Error',
+      error,
+    }, 500);
+  }
+});
+
+app.patch('/api/webhooks/:webhookId', async (c) => {
+  try {
+    const webhookId = c.req.param('webhookId');
+    const body = await c.req.json<CreateWebhookBody>();
+    const userId = body.user_id;
+
+    if (!webhookId || !userId) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Missing webhookId or user_id',
+      }, 400);
+    }
+
+    const { data: existing, error: fetchError } = await c.req.db
+      .from('ultravox_webhooks')
+      .select('*')
+      .eq('webhook_id', webhookId)
+      .eq('user_id', userId)
+      .single();
+
+    if (fetchError || !existing) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Webhook not found',
+        error: fetchError,
+      }, 404);
+    }
+
+    if (!existing.ultravox_webhook_id) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Missing Ultravox webhook id',
+      }, 400);
+    }
+
+    const rawAgentId = body.agentId ?? null;
+    const updatePayload: Record<string, unknown> = {};
+    if (body.url) updatePayload.url = body.url.trim();
+    if (body.events) updatePayload.events = body.events;
+    if (rawAgentId !== undefined) updatePayload.agentId = rawAgentId;
+    if (body.secrets) updatePayload.secrets = body.secrets;
+
+    const ultraResponse = await fetch(`${ULTRAVOX_API_BASE}/webhooks/${existing.ultravox_webhook_id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': c.env.ULTRAVOX_API_KEY,
+      },
+      body: JSON.stringify(updatePayload),
+    });
+
+    if (!ultraResponse.ok) {
+      const errorText = await ultraResponse.text();
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Ultravox API error',
+        error: errorText,
+      }, 500);
+    }
+
+    const ultraData = await ultraResponse.json() as UltravoxWebhookResponse;
+
+    const isUuid = (value: string | null) =>
+      !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    const dbAgentId = isUuid(body.agent_id ?? null)
+      ? body.agent_id!
+      : (isUuid(rawAgentId) ? rawAgentId : null);
+
+    const { data: updated, error: updateError } = await c.req.db
+      .from('ultravox_webhooks')
+      .update({
+        url: ultraData.url,
+        events: ultraData.events,
+        agent_id: dbAgentId,
+        status: ultraData.status,
+        last_status_change: ultraData.lastStatusChange,
+        secret_key: ultraData.secrets?.[0] ?? null,
+        recent_failures: ultraData.recentFailures ?? [],
+      })
+      .eq('webhook_id', webhookId)
+      .select('*')
+      .single();
+
+    if (updateError) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Failed to update webhook in database',
+        error: updateError,
+      }, 500);
+    }
+
+    return c.json<ApiResponse<any>>({
+      status: 'success',
+      data: {
+        webhook_id: updated.webhook_id,
+        created: ultraData.created || updated.created_at,
+        url: updated.url,
+        events: updated.events,
+        status: updated.status,
+        lastStatusChange: updated.last_status_change,
+        recentFailures: updated.recent_failures || [],
+        agentId: updated.agent_id,
+        secrets: ultraData.secrets || [],
+      },
+    });
+  } catch (error) {
+    console.error('Update Webhook Error:', error);
+    return c.json<ApiResponse<null>>({
+      status: 'error',
+      message: 'Internal Server Error',
+      error,
+    }, 500);
+  }
+});
+
+app.delete('/api/webhooks/:webhookId', async (c) => {
+  try {
+    const webhookId = c.req.param('webhookId');
+    const userId = c.req.query('user_id');
+
+    if (!webhookId || !userId) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Missing webhookId or user_id',
+      }, 400);
+    }
+
+    const { data: existing, error: fetchError } = await c.req.db
+      .from('ultravox_webhooks')
+      .select('*')
+      .eq('webhook_id', webhookId)
+      .eq('user_id', userId)
+      .single();
+
+    if (fetchError || !existing) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Webhook not found',
+        error: fetchError,
+      }, 404);
+    }
+
+    if (existing.ultravox_webhook_id) {
+      const ultraResponse = await fetch(`${ULTRAVOX_API_BASE}/webhooks/${existing.ultravox_webhook_id}`, {
+        method: 'DELETE',
+        headers: {
+          'X-API-Key': c.env.ULTRAVOX_API_KEY,
+        },
+      });
+
+      if (!ultraResponse.ok) {
+        const errorText = await ultraResponse.text();
+        return c.json<ApiResponse<null>>({
+          status: 'error',
+          message: 'Ultravox API error',
+          error: errorText,
+        }, 500);
+      }
+    }
+
+    const { error: deleteError } = await c.req.db
+      .from('ultravox_webhooks')
+      .delete()
+      .eq('webhook_id', webhookId);
+
+    if (deleteError) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Failed to delete webhook from database',
+        error: deleteError,
+      }, 500);
+    }
+
+    return c.json<ApiResponse<{ success: true }>>({
+      status: 'success',
+      data: { success: true },
+    });
+  } catch (error) {
+    console.error('Delete Webhook Error:', error);
+    return c.json<ApiResponse<null>>({
+      status: 'error',
+      message: 'Internal Server Error',
+      error,
+    }, 500);
+  }
+});
+
+app.post('/api/webhooks/sync', async (c) => {
+  try {
+    const userId = c.req.query('user_id');
+    const forceRecreate = c.req.query('recreate') === 'true';
+
+    if (!userId) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Missing user_id',
+      }, 400);
+    }
+
+    const { data: rows, error } = await c.req.db
+      .from('ultravox_webhooks')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Failed to fetch webhooks from database',
+        error,
+      }, 500);
+    }
+
+    const created: string[] = [];
+    const skipped: string[] = [];
+    const failed: Array<{ webhook_id: string; error: string }> = [];
+
+    for (const row of rows || []) {
+      if (row.ultravox_webhook_id && !forceRecreate) {
+        skipped.push(row.webhook_id);
+        continue;
+      }
+
+      try {
+        const ultraResponse = await fetch(`${ULTRAVOX_API_BASE}/webhooks`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': c.env.ULTRAVOX_API_KEY,
+          },
+          body: JSON.stringify({
+            url: row.url,
+            events: row.events,
+          }),
+        });
+
+        if (!ultraResponse.ok) {
+          const errorText = await ultraResponse.text();
+          failed.push({ webhook_id: row.webhook_id, error: errorText });
+          continue;
+        }
+
+        const ultraData = await ultraResponse.json() as UltravoxWebhookResponse;
+
+        const { error: updateError } = await c.req.db
+          .from('ultravox_webhooks')
+          .update({
+            ultravox_webhook_id: ultraData.webhookId,
+            status: ultraData.status,
+            last_status_change: ultraData.lastStatusChange,
+            secret_key: ultraData.secrets?.[0] ?? null,
+            recent_failures: ultraData.recentFailures ?? [],
+          })
+          .eq('webhook_id', row.webhook_id);
+
+        if (updateError) {
+          failed.push({ webhook_id: row.webhook_id, error: String(updateError) });
+          continue;
+        }
+
+        created.push(row.webhook_id);
+      } catch (err) {
+        failed.push({ webhook_id: row.webhook_id, error: String(err) });
+      }
+    }
+
+    return c.json<ApiResponse<{ created: string[]; skipped: string[]; failed: Array<{ webhook_id: string; error: string }> }>>({
+      status: 'success',
+      data: {
+        created,
+        skipped,
+        failed,
+      },
+    });
+  } catch (error) {
+    console.error('Sync Webhooks Error:', error);
+    return c.json<ApiResponse<null>>({
+      status: 'error',
+      message: 'Internal Server Error',
+      error,
+    }, 500);
+  }
+});
+
+app.post('/api/webhooks/sync-all', async (c) => {
+  try {
+    const token = c.req.query('token');
+    const forceRecreate = c.req.query('recreate') === 'true';
+
+    if (!token || token !== c.env.WEBHOOK_SYNC_SECRET) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Unauthorized',
+      }, 401);
+    }
+
+    const { data: rows, error } = await c.req.db
+      .from('ultravox_webhooks')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Failed to fetch webhooks from database',
+        error,
+      }, 500);
+    }
+
+    const created: string[] = [];
+    const skipped: string[] = [];
+    const failed: Array<{ webhook_id: string; error: string }> = [];
+
+    for (const row of rows || []) {
+      if (row.ultravox_webhook_id && !forceRecreate) {
+        skipped.push(row.webhook_id);
+        continue;
+      }
+
+      try {
+        const ultraResponse = await fetch(`${ULTRAVOX_API_BASE}/webhooks`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': c.env.ULTRAVOX_API_KEY,
+          },
+          body: JSON.stringify({
+            url: row.url,
+            events: row.events,
+          }),
+        });
+
+        if (!ultraResponse.ok) {
+          const errorText = await ultraResponse.text();
+          failed.push({ webhook_id: row.webhook_id, error: errorText });
+          continue;
+        }
+
+        const ultraData = await ultraResponse.json() as UltravoxWebhookResponse;
+
+        const { error: updateError } = await c.req.db
+          .from('ultravox_webhooks')
+          .update({
+            ultravox_webhook_id: ultraData.webhookId,
+            status: ultraData.status,
+            last_status_change: ultraData.lastStatusChange,
+            secret_key: ultraData.secrets?.[0] ?? null,
+            recent_failures: ultraData.recentFailures ?? [],
+          })
+          .eq('webhook_id', row.webhook_id);
+
+        if (updateError) {
+          failed.push({ webhook_id: row.webhook_id, error: String(updateError) });
+          continue;
+        }
+
+        created.push(row.webhook_id);
+      } catch (err) {
+        failed.push({ webhook_id: row.webhook_id, error: String(err) });
+      }
+    }
+
+    return c.json<ApiResponse<{ created: string[]; skipped: string[]; failed: Array<{ webhook_id: string; error: string }> }>>({
+      status: 'success',
+      data: {
+        created,
+        skipped,
+        failed,
+      },
+    });
+  } catch (error) {
+    console.error('Sync All Webhooks Error:', error);
+    return c.json<ApiResponse<null>>({
+      status: 'error',
+      message: 'Internal Server Error',
+      error,
+    }, 500);
+  }
+});
+
+app.get('/api/webhooks/missing', async (c) => {
+  try {
+    const userId = c.req.query('user_id');
+
+    if (!userId) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Missing user_id',
+      }, 400);
+    }
+
+    const { data, error } = await c.req.db
+      .from('ultravox_webhooks')
+      .select('*')
+      .eq('user_id', userId)
+      .is('ultravox_webhook_id', null)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Failed to fetch missing webhooks',
+        error,
+      }, 500);
+    }
+
+    return c.json<ApiResponse<any[]>>({
+      status: 'success',
+      data: data || [],
+    });
+  } catch (error) {
+    console.error('Missing Webhooks Error:', error);
+    return c.json<ApiResponse<null>>({
+      status: 'error',
+      message: 'Internal Server Error',
+      error,
+    }, 500);
+  }
+});
+
+app.get('/api/webhooks/ultravox', async (c) => {
+  try {
+    const cursor = c.req.query('cursor');
+    const pageSize = c.req.query('pageSize');
+    const agentId = c.req.query('agentId');
+
+    const params = new URLSearchParams();
+    if (cursor) params.append('cursor', cursor);
+    if (pageSize) params.append('pageSize', pageSize);
+    if (agentId) params.append('agentId', agentId);
+
+    const url = params.toString()
+      ? `${ULTRAVOX_API_BASE}/webhooks?${params.toString()}`
+      : `${ULTRAVOX_API_BASE}/webhooks`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': c.env.ULTRAVOX_API_KEY,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return c.json<ApiResponse<null>>({
+        status: 'error',
+        message: 'Ultravox API error',
+        error: errorText,
+      }, 500);
+    }
+
+    const data = await response.json();
+    return c.json<ApiResponse<any>>({
+      status: 'success',
+      data,
+    });
+  } catch (error) {
+    console.error('List Ultravox Webhooks Error:', error);
+    return c.json<ApiResponse<null>>({
+      status: 'error',
+      message: 'Internal Server Error',
+      error,
+    }, 500);
+  }
+});
 
 app.post('/api/ultravox/createcall' , async (c) => {
   
